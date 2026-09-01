@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CarbonFree ISP — Módulo 1</title>
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23127a55'/><text y='23' x='16' text-anchor='middle' font-size='18' fill='%23fff' font-family='sans-serif'>I</text></svg>">
+</head>
+<body>
+<div id="app" class="shell aba-oculta">
+  <aside class="sidebar">
+    <div class="sidebar__marca"><b>CarbonFree ISP</b><span>Módulo 1</span></div>
+    <div class="sidebar__empresa" id="box-empresa"></div>
+    <nav id="nav">
+      <div class="grupo">Operação</div>
+      <button data-tela="dashboard">Dashboard</button>
+      <button data-tela="energia">Energia &amp; POPs</button>
+      <button data-tela="frota">Frota</button>
+      <button data-tela="comodato">Comodato</button>
+      <div class="grupo">Fiscal</div>
+      <button data-tela="incentivos">Incentivos</button>
+      <button data-tela="simulador">Simulador de regime</button>
+      <button data-tela="pd">Projetos P&amp;D</button>
+      <div class="grupo">Saída</div>
+      <button data-tela="mrv">Fechamento MRV</button>
+      <button data-tela="selo">Selo ISP Verde</button>
+    </nav>
+    <div class="sidebar__rodape">
+      <a href="index.html" style="color:var(--ink-400);text-decoration:none">← Painel</a>
+    </div>
+  </aside>
+
+  <main class="conteudo">
+    <div class="topo"><h1 id="titulo">Dashboard</h1><p id="subtitulo"></p></div>
+
+    <!-- ---------------------------------------------------- dashboard -->
+    <section id="tela-dashboard" class="pagina">
+      <section><dl class="grade grade--4" id="kpis"></dl></section>
+
+      <div class="grade grade--2">
+        <section class="cartao">
+          <header><h2>Balanço por escopo</h2>
+            <span class="selo selo--neutro">GHG Protocol</span></header>
+          <div class="tabela-wrap"><table class="tabela">
+            <thead><tr><th>Escopo</th><th class="n">Passivo</th><th class="n">Ativo</th><th style="width:120px">Partidas</th></tr></thead>
+            <tbody id="tb-escopos"></tbody>
+          </table></div>
+        </section>
+
+        <section class="cartao">
+          <header><h2>Balanço por categoria</h2></header>
+          <div class="tabela-wrap"><table class="tabela">
+            <thead><tr><th>Categoria</th><th class="n">Passivo</th><th class="n">Ativo</th></tr></thead>
+            <tbody id="tb-categorias"></tbody>
+          </table></div>
+        </section>
+      </div>
+
+      <section class="cartao">
+        <header><h2>Lançamentos recentes</h2>
+          <span class="selo selo--neutro">todo lançamento tem documento-fonte</span></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr>
+            <th>Competência</th><th>Categoria</th><th>Nat.</th><th class="n">Esc.</th>
+            <th class="n">tCO₂e</th><th>Documento-fonte</th><th></th>
+          </tr></thead>
+          <tbody id="tb-lancamentos"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- ------------------------------------------------------ energia -->
+    <section id="tela-energia" class="pagina aba-oculta">
+      <p class="dica">RF-ISP-002 — cadastre as unidades consumidoras e importe as faturas.
+        A extração de kWh é assistida: a fatura é preservada com hash e o consumo é
+        confirmado por você, porque OCR sem conferência não sustenta dossiê.</p>
+
+      <div class="grade grade--2">
+        <section class="cartao">
+          <header><h2>Nova unidade consumidora</h2></header>
+          <div class="cartao__corpo">
+            <form id="form-uc">
+              <div class="linha">
+                <label class="campo"><span>Apelido</span><input name="apelido" required placeholder="POP Centro"></label>
+                <label class="campo"><span>Código da UC</span><input name="codigo_uc"></label>
+              </div>
+              <div class="linha" style="margin-top:12px">
+                <label class="campo"><span>Tipo</span>
+                  <select name="tipo">
+                    <option value="pop">POP</option><option value="headend">Headend</option>
+                    <option value="datacenter">Data center</option><option value="escritorio">Escritório</option>
+                  </select></label>
+                <label class="campo"><span>Distribuidora</span><input name="distribuidora"></label>
+                <label class="campo" style="flex:0 1 90px"><span>UF</span><input name="uf" maxlength="2" style="text-transform:uppercase"></label>
+              </div>
+              <div class="linha" style="margin-top:12px">
+                <label class="campo"><span>Tem GD solar?</span>
+                  <select name="tem_gd_solar"><option value="false">Não</option><option value="true">Sim</option></select></label>
+                <label class="campo"><span>Potência GD (kWp)</span><input name="potencia_gd_kwp" type="number" step="0.01" min="0"></label>
+                <button class="btn" type="submit">Adicionar</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="cartao">
+          <header><h2>Importar fatura de energia</h2></header>
+          <div class="cartao__corpo">
+            <form id="form-fatura">
+              <label class="campo"><span>Unidade consumidora</span>
+                <select name="uc_id" id="sel-uc" required></select></label>
+              <div class="linha">
+                <label class="campo"><span>Competência</span><input name="competencia" type="month" required></label>
+                <label class="campo"><span>kWh consumidos da rede</span>
+                  <input name="kwh_rede" type="number" step="0.01" min="0" required></label>
+                <label class="campo"><span>kWh compensados (GD)</span>
+                  <input name="kwh_gd" type="number" step="0.01" min="0" value="0"></label>
+              </div>
+              <div class="linha" style="margin-top:12px">
+                <label class="campo"><span>Valor da fatura (R$)</span><input name="valor" type="number" step="0.01" min="0"></label>
+                <label class="campo"><span>Arquivo (PDF/imagem)</span><input name="arquivo" type="file" accept=".pdf,image/*" required></label>
+              </div>
+              <button class="btn" type="submit" style="margin-top:12px">Importar e lançar</button>
+            </form>
+          </div>
+        </section>
+      </div>
+
+      <section class="cartao">
+        <header><h2>Unidades consumidoras</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Apelido</th><th>Código</th><th>Tipo</th><th>UF</th><th>GD solar</th><th class="n">kWh acum.</th></tr></thead>
+          <tbody id="tb-ucs"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- -------------------------------------------------------- frota -->
+    <section id="tela-frota" class="pagina aba-oculta">
+      <p class="dica">RF-ISP-003 — importe o XML da NF-e de abastecimento. O parser
+        identifica combustível por NCM 2710 e descrição, e classifica como escopo 1.</p>
+
+      <section class="cartao">
+        <header><h2>Importar NF-e de combustível</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-nfe">
+            <div class="linha">
+              <label class="campo"><span>XML(s) da NF-e</span>
+                <input name="arquivos" type="file" accept=".xml" multiple required></label>
+              <button class="btn" type="submit">Importar lote</button>
+            </div>
+          </form>
+          <div id="relatorio-nfe" style="margin-top:14px"></div>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Abastecimentos importados</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Emissão</th><th>Chave</th><th>Emitente</th><th class="n">Litros</th><th class="n">Valor</th><th>Inconsistências</th></tr></thead>
+          <tbody id="tb-nfe"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- ----------------------------------------------------- comodato -->
+    <section id="tela-comodato" class="pagina aba-oculta">
+      <p class="dica">RF-ISP-004 — ciclo de vida por serial:
+        <code>novo → em campo → retorno → refurb → descarte</code>.
+        Refurb gera lançamento ATIVO (carbono incorporado evitado); descarte sem
+        CDF gera passivo.</p>
+
+      <div class="grade grade--2">
+        <section class="cartao">
+          <header><h2>Registrar equipamento</h2></header>
+          <div class="cartao__corpo">
+            <form id="form-ativo">
+              <div class="linha">
+                <label class="campo"><span>Serial</span><input name="serial" required></label>
+                <label class="campo"><span>Modelo</span><input name="modelo"></label>
+              </div>
+              <div class="linha" style="margin-top:12px">
+                <label class="campo"><span>Fabricante</span><input name="fabricante"></label>
+                <label class="campo"><span>NCM</span><input name="ncm" maxlength="8" inputmode="numeric"></label>
+                <button class="btn" type="submit">Adicionar</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="cartao">
+          <header><h2>Inventário por estado</h2></header>
+          <div class="cartao__corpo"><div id="resumo-comodato" class="funil"></div></div>
+        </section>
+      </div>
+
+      <section class="cartao">
+        <header><h2>Equipamentos</h2>
+          <input id="busca-ativo" placeholder="filtrar por serial ou modelo" style="max-width:260px"></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Serial</th><th>Modelo</th><th>Estado</th><th class="n">Refurbs</th><th>Mover para</th></tr></thead>
+          <tbody id="tb-ativos"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- --------------------------------------------------- incentivos -->
+    <section id="tela-incentivos" class="pagina aba-oculta">
+      <div class="aviso">
+        <strong>§12 — limites de atuação</strong>
+        A plataforma entrega evidência técnica e memória de cálculo. Parecer é de
+        advogado tributarista; escrituração e assinatura, de contador registrado.
+        Nenhum incentivo chega a <em>ativo</em> sem passar por <em>validação de parceiro</em>.
+      </div>
+
+      <section><div class="funil" id="funil-resumo"></div></section>
+
+      <section class="cartao">
+        <header><h2>Funil de qualificação</h2>
+          <button class="btn btn--sec btn--peq" id="btn-reavaliar">Reavaliar elegibilidade</button></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr>
+            <th>Incentivo</th><th>Requisitos</th><th>Etapa</th>
+            <th class="n">Economia estimada/ano</th><th>Reforma</th><th>Validação</th><th></th>
+          </tr></thead>
+          <tbody id="tb-incentivos"></tbody>
+        </table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Dossiê probatório</h2></header>
+        <div class="cartao__corpo">
+          <p class="dica">RF-ISP-010 — exporta base legal, memória de cálculo, documentos-fonte
+            (com hash) e trilha de auditoria. A v0 gera o dossiê em JSON assinável e uma
+            versão imprimível; o PDF nativo entra com a Edge Function da F4.</p>
+          <div class="linha">
+            <label class="campo"><span>Incentivo</span><select id="sel-dossie"></select></label>
+            <button class="btn" id="btn-dossie">Gerar dossiê</button>
+            <button class="btn btn--sec" id="btn-dossie-print">Versão imprimível</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ---------------------------------------------------- simulador -->
+    <section id="tela-simulador" class="pagina aba-oculta">
+      <p class="dica">RF-ISP-007 — comparativo Simples × Presumido × Real, mais o
+        cenário CBS/IBS com crédito amplo sobre CAPEX de rede. Parâmetros editáveis:
+        o simulador lê a curva de transição da tabela <code>reforma_transicao</code>.</p>
+
+      <section class="cartao">
+        <header><h2>Parâmetros</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-sim" class="linha">
+            <label class="campo"><span>Faturamento anual (R$)</span>
+              <input name="faturamento" type="number" step="0.01" min="0" required></label>
+            <label class="campo"><span>Custos dedutíveis (R$)</span>
+              <input name="custos" type="number" step="0.01" min="0" value="0"></label>
+            <label class="campo"><span>CAPEX de rede (R$)</span>
+              <input name="capex" type="number" step="0.01" min="0" value="0"></label>
+            <label class="campo" style="flex:0 1 110px"><span>Ano</span>
+              <input name="ano" type="number" min="2026" max="2033" value="2026"></label>
+            <button class="btn" type="submit">Simular</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="resultado-sim"></section>
+    </section>
+
+    <!-- ----------------------------------------------------------- P&D -->
+    <section id="tela-pd" class="pagina aba-oculta">
+      <p class="dica">RF-ISP-008 — Lei do Bem (Lei 11.196/2005). Exige Lucro Real e
+        lucro no exercício. Registre elemento tecnológico e barreira técnica: é o que
+        o FORMP&D cobra e o que sustenta a exclusão adicional.</p>
+
+      <section class="cartao">
+        <header><h2>Novo projeto</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-pd">
+            <div class="linha">
+              <label class="campo" style="flex:2 1 260px"><span>Título</span><input name="titulo" required></label>
+              <label class="campo" style="flex:0 1 110px"><span>Exercício</span>
+                <input name="exercicio" type="number" min="2020" max="2035" required></label>
+            </div>
+            <label class="campo" style="margin-top:12px"><span>Elemento tecnológico</span>
+              <textarea name="elemento_tecnologico" rows="2" placeholder="O que há de novo tecnicamente?"></textarea></label>
+            <label class="campo"><span>Barreira técnica superada</span>
+              <textarea name="barreira_tecnica" rows="2" placeholder="Qual incerteza não era resolvível com conhecimento disponível?"></textarea></label>
+            <div class="linha">
+              <label class="campo"><span>Horas alocadas</span><input name="horas_alocadas" type="number" step="0.01" min="0"></label>
+              <label class="campo"><span>Dispêndio total (R$)</span><input name="dispendio_total" type="number" step="0.01" min="0"></label>
+              <label class="campo" style="flex:0 1 150px"><span>% exclusão</span>
+                <input name="percentual_exclusao" type="number" step="0.01" min="0" max="100" value="60"></label>
+              <button class="btn" type="submit">Registrar</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Projetos</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Título</th><th class="n">Exercício</th><th class="n">Dispêndio</th>
+            <th class="n">% excl.</th><th class="n">Exclusão adicional</th><th>Etapa</th></tr></thead>
+          <tbody id="tb-pd"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- ----------------------------------------------------------- MRV -->
+    <section id="tela-mrv" class="pagina aba-oculta">
+      <p class="dica">§5 — fechamento MRV mensal. Consolida passivo e ativo da
+        competência e congela o número que vai para o dossiê.</p>
+      <section class="cartao">
+        <header><h2>Fechar competência</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-mrv" class="linha">
+            <label class="campo"><span>Competência</span><input name="competencia" type="month" required></label>
+            <button class="btn" type="submit">Fechar</button>
+          </form>
+        </div>
+      </section>
+      <section class="cartao">
+        <header><h2>Fechamentos</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Competência</th><th class="n">Passivo</th><th class="n">Ativo</th>
+            <th class="n">Líquido</th><th class="n">Docs</th><th>Status</th></tr></thead>
+          <tbody id="tb-mrv"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- ---------------------------------------------------------- selo -->
+    <section id="tela-selo" class="pagina aba-oculta">
+      <p class="dica">RF-ISP-009 — relatório público com o balanço de carbono do
+        exercício. O QR aponta para a verificação; enquanto os fatores estiverem
+        <em>não validados</em>, o selo sai marcado como preliminar.</p>
+      <section id="cartao-selo"></section>
+    </section>
+
+    <footer class="rodape-legal">
+      Documento de trabalho da DNS-TI Consultoria. Não constitui parecer jurídico ou contábil.
+    </footer>
+  </main>
+</div>
+<div id="toasts"></div>
+<script type="module" src="assets/js/app-isp.js"></script>
+</body>
+</html>

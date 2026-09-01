@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cteProc xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+<CTe><infCte Id="CTe42260198765432000188570010000045671000045675" versao="4.00">
+<ide><cUF>42</cUF><CFOP>6353</CFOP><nCT>4567</nCT><dhEmi>2026-02-20T08:00:00-03:00</dhEmi><modal>01</modal>
+<UFIni>SC</UFIni><xMunIni>Joinville</xMunIni><UFFim>SP</UFFim><xMunFim>Campinas</xMunFim></ide>
+<emit><CNPJ>98765432000188</CNPJ><xNome>TRANSPORTES BETA LTDA</xNome></emit>
+<vPrest><vTPrest>3200.00</vTPrest></vPrest>
+<infCTeNorm><infCarga><vCarga>150000.00</vCarga>
+<infQ><cUnid>01</cUnid><tpMed>PESO BRUTO</tpMed><qCarga>2450.0000</qCarga></infQ>
+<infQ><cUnid>03</cUnid><tpMed>UNIDADES</tpMed><qCarga>340.0000</qCarga></infQ>
+</infCarga></infCTeNorm>
+</infCte></CTe></cteProc>

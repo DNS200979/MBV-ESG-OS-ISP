@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CarbonFree Dist — Módulo 2</title>
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231f5f8b'/><text y='23' x='16' text-anchor='middle' font-size='18' fill='%23fff' font-family='sans-serif'>D</text></svg>">
+</head>
+<body>
+<div id="app" class="shell aba-oculta">
+  <aside class="sidebar">
+    <div class="sidebar__marca"><b>CarbonFree Dist</b><span>Módulo 2</span></div>
+    <div class="sidebar__empresa" id="box-empresa"></div>
+    <nav id="nav">
+      <div class="grupo">Operação</div>
+      <button data-tela="dashboard">Dashboard</button>
+      <button data-tela="importacao">Importação (DI &amp; TTD)</button>
+      <button data-tela="extarifario">Ex-tarifário</button>
+      <button data-tela="logistica">Logística (CT-e)</button>
+      <button data-tela="reversa">Reversa &amp; Certificados</button>
+      <div class="grupo">Fiscal</div>
+      <button data-tela="reforma">Reforma 2026–2033</button>
+      <button data-tela="incentivos">Incentivos</button>
+      <div class="grupo">Saída</div>
+      <button data-tela="vendor">Relatório Vendor ESG</button>
+    </nav>
+    <div class="sidebar__rodape">
+      <a href="index.html" style="color:var(--ink-400);text-decoration:none">← Painel</a>
+    </div>
+  </aside>
+
+  <main class="conteudo">
+    <div class="topo"><h1 id="titulo">Dashboard</h1><p id="subtitulo"></p></div>
+
+    <!-- ---------------------------------------------------- dashboard -->
+    <section id="tela-dashboard" class="pagina">
+      <section><dl class="grade grade--4" id="kpis"></dl></section>
+      <div class="grade grade--2">
+        <section class="cartao">
+          <header><h2>Balanço por escopo</h2></header>
+          <div class="tabela-wrap"><table class="tabela">
+            <thead><tr><th>Escopo</th><th class="n">Passivo</th><th class="n">Ativo</th><th style="width:120px">Partidas</th></tr></thead>
+            <tbody id="tb-escopos"></tbody></table></div>
+        </section>
+        <section class="cartao">
+          <header><h2>Condicionantes do TTD</h2>
+            <span class="selo selo--neutro">RF-DIST-005</span></header>
+          <div class="tabela-wrap"><table class="tabela">
+            <thead><tr><th>Obrigação</th><th>Prazo</th><th>Status</th></tr></thead>
+            <tbody id="tb-cond-resumo"></tbody></table></div>
+        </section>
+      </div>
+      <section class="cartao">
+        <header><h2>Lançamentos recentes</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Competência</th><th>Categoria</th><th>Nat.</th><th class="n">Esc.</th>
+            <th class="n">tCO₂e</th><th>Documento-fonte</th></tr></thead>
+          <tbody id="tb-lancamentos"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- --------------------------------------------------- importação -->
+    <section id="tela-importacao" class="pagina aba-oculta">
+      <p class="dica">RF-DIST-003 / RF-DIST-005 — cada DI registra o ICMS que seria devido
+        sem o benefício e o efetivamente pago. A diferença é a economia realizada,
+        com memória de cálculo. O painel de condicionantes é o que mantém o benefício vivo.</p>
+
+      <div class="grade grade--2">
+        <section class="cartao">
+          <header><h2>Registrar DI</h2></header>
+          <div class="cartao__corpo">
+            <form id="form-di">
+              <div class="linha">
+                <label class="campo"><span>Número da DI</span><input name="numero_di" required></label>
+                <label class="campo"><span>Data de registro</span><input name="data_registro" type="date" required></label>
+                <label class="campo" style="flex:0 1 90px"><span>UF</span>
+                  <input name="uf_desembaraco" maxlength="2" style="text-transform:uppercase"></label>
+              </div>
+              <div class="linha" style="margin-top:12px">
+                <label class="campo"><span>Valor aduaneiro (R$)</span>
+                  <input name="valor_aduaneiro" type="number" step="0.01" min="0" required></label>
+                <label class="campo"><span>ICMS sem benefício (R$)</span>
+                  <input name="icms_sem_beneficio" type="number" step="0.01" min="0"></label>
+                <label class="campo"><span>ICMS com benefício (R$)</span>
+                  <input name="icms_com_beneficio" type="number" step="0.01" min="0"></label>
+              </div>
+              <div class="linha" style="margin-top:12px">
+                <label class="campo"><span>Enquadramento</span>
+                  <input name="enquadramento" placeholder="TTD 409 / 410 / 411"></label>
+                <label class="campo"><span>Documento (XML/PDF da DI)</span>
+                  <input name="arquivo" type="file" accept=".xml,.pdf,.txt"></label>
+                <button class="btn" type="submit">Registrar</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="cartao">
+          <header><h2>Nova condicionante</h2></header>
+          <div class="cartao__corpo">
+            <form id="form-cond">
+              <div class="linha">
+                <label class="campo"><span>Enquadramento</span><input name="enquadramento" required placeholder="TTD 409"></label>
+                <label class="campo"><span>Periodicidade</span>
+                  <select name="periodicidade">
+                    <option value="mensal">Mensal</option><option value="trimestral">Trimestral</option>
+                    <option value="anual">Anual</option><option value="unica">Única</option>
+                  </select></label>
+              </div>
+              <label class="campo" style="margin-top:12px"><span>Obrigação</span>
+                <input name="descricao" required placeholder="Recolhimento ao fundo estadual"></label>
+              <div class="linha" style="margin-top:12px">
+                <label class="campo"><span>Próximo prazo</span><input name="proximo_prazo" type="date"></label>
+                <button class="btn" type="submit">Adicionar</button>
+              </div>
+            </form>
+          </div>
+        </section>
+      </div>
+
+      <section class="cartao">
+        <header><h2>Declarações de importação</h2>
+          <span class="selo selo--nao_validado" id="selo-di"></span></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>DI</th><th>Registro</th><th>UF</th><th>Enquadramento</th>
+            <th class="n">Valor aduaneiro</th><th class="n">ICMS s/ benef.</th>
+            <th class="n">ICMS pago</th><th class="n">Economia</th></tr></thead>
+          <tbody id="tb-di"></tbody></table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Painel de condicionantes</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Enquadramento</th><th>Obrigação</th><th>Periodicidade</th>
+            <th>Prazo</th><th>Status</th><th></th></tr></thead>
+          <tbody id="tb-cond"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- -------------------------------------------------- ex-tarifário -->
+    <section id="tela-extarifario" class="pagina aba-oculta">
+      <p class="dica">RF-DIST-004 — cruza os NCMs do seu portfólio com os pleitos de
+        ex-tarifário cadastrados. O catálogo é global e entra como
+        <em>não validado</em> até conferência da resolução Gecex/Camex vigente.</p>
+
+      <section class="cartao">
+        <header><h2>Adicionar NCM ao portfólio</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-ncm" class="linha">
+            <label class="campo" style="flex:0 1 150px"><span>NCM (8 dígitos)</span>
+              <input name="ncm" required maxlength="8" inputmode="numeric" pattern="[0-9]{8}"></label>
+            <label class="campo" style="flex:2 1 260px"><span>Descrição</span><input name="descricao" required></label>
+            <label class="campo"><span>Volume anual (R$)</span>
+              <input name="volume_anual" type="number" step="0.01" min="0"></label>
+            <button class="btn" type="submit">Adicionar</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Portfólio × pleitos vigentes</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>NCM</th><th>Descrição</th><th class="n">Volume anual</th>
+            <th>Pleito de ex-tarifário</th><th class="n">II reduzido</th><th>Vigência</th></tr></thead>
+          <tbody id="tb-ncm"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- ---------------------------------------------------- logística -->
+    <section id="tela-logistica" class="pagina aba-oculta">
+      <p class="dica">RF-DIST-002 — importação de CT-e em lote (RNF-004: 1.000 documentos
+        em até 60 s, com relatório de inconsistências). O leiaute do CT-e <strong>não traz
+        distância percorrida</strong>: informe a média de km por embarque ou complete
+        depois, embarque a embarque.</p>
+
+      <section class="cartao">
+        <header><h2>Importar CT-e</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-cte">
+            <div class="linha">
+              <label class="campo"><span>XML(s) do CT-e</span>
+                <input name="arquivos" type="file" accept=".xml" multiple required></label>
+              <label class="campo" style="flex:0 1 190px"><span>Distância média (km)</span>
+                <input name="km" type="number" step="1" min="0" required placeholder="ex.: 480"></label>
+              <button class="btn" type="submit">Importar lote</button>
+            </div>
+            <p class="dica" style="margin:10px 0 0">
+              O km informado entra na memória de cálculo como premissa declarada —
+              fica explícito no dossiê que a distância não veio do documento fiscal.
+            </p>
+          </form>
+          <div id="relatorio-cte" style="margin-top:14px"></div>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Embarques importados</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Emissão</th><th>Modal</th><th>Rota</th><th class="n">Peso (t)</th>
+            <th class="n">km</th><th class="n">t·km</th><th>Inconsist.</th></tr></thead>
+          <tbody id="tb-cte"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- ------------------------------------------------------ reversa -->
+    <section id="tela-reversa" class="pagina aba-oculta">
+      <div class="aviso aviso--info">
+        <strong>PNRS é obrigação, não escolha (§1.3)</strong>
+        O lote só chega a <em>destinado</em> com CDF anexado — a restrição é do banco.
+        Quando o CDF entra, o ativo de carbono é rateado entre distribuidor e ISP
+        parceiro conforme o percentual do vínculo (§8), com dois lançamentos amarrados
+        ao mesmo documento.
+      </div>
+
+      <section class="cartao">
+        <header><h2>Novo lote</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-lote">
+            <div class="linha">
+              <label class="campo"><span>Identificação</span><input name="identificacao" placeholder="LOTE-2026-014"></label>
+              <label class="campo"><span>Peso (kg)</span>
+                <input name="peso_kg" type="number" step="0.01" min="0.01" required></label>
+              <label class="campo"><span>Qtd. equipamentos</span><input name="qtd_equipamentos" type="number" min="0"></label>
+            </div>
+            <div class="linha" style="margin-top:12px">
+              <label class="campo"><span>Destinador (CNPJ)</span><input name="destinador_cnpj" inputmode="numeric"></label>
+              <label class="campo"><span>Destinador (nome)</span><input name="destinador_nome"></label>
+              <label class="campo"><span>ISP parceiro</span>
+                <select name="isp_parceiro_id" id="sel-isp"><option value="">— sem rateio —</option></select></label>
+              <button class="btn" type="submit">Criar lote</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Lotes</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Lote</th><th class="n">Peso</th><th>Destinador</th><th>Status</th>
+            <th class="n">Rateio ISP</th><th>MTR / CDF</th><th>Ação</th></tr></thead>
+          <tbody id="tb-lotes"></tbody></table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Certificados de reciclagem</h2>
+          <span class="selo selo--neutro">Decreto 11.413/2023</span></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Lote</th><th>Tipo</th><th class="n">Quantidade</th><th>Número externo</th><th>Emissão</th></tr></thead>
+          <tbody id="tb-certificados"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- ------------------------------------------------------ reforma -->
+    <section id="tela-reforma" class="pagina aba-oculta">
+      <p class="dica">RF-DIST-007 — curva de extinção dos benefícios de ICMS e a
+        compensação estimada. Os percentuais vêm da tabela <code>reforma_transicao</code>:
+        quando a lei mudar, muda o parâmetro, não o código (§15).</p>
+
+      <section class="cartao">
+        <header><h2>Exposição</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-reforma" class="linha">
+            <label class="campo"><span>Economia de ICMS anual atual (R$)</span>
+              <input name="economia" type="number" step="0.01" min="0" required></label>
+            <button class="btn" type="submit">Projetar</button>
+            <button class="btn btn--sec" type="button" id="btn-usar-di">Usar economia das DIs</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Curva 2026–2033</h2>
+          <span class="selo selo--nao_validado">parâmetros provisórios</span></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th class="n">Ano</th><th class="n">CBS</th><th class="n">IBS</th>
+            <th class="n">ICMS/ISS</th><th class="n">Benefícios</th>
+            <th class="n">Economia remanescente</th><th class="n">Perda no ano</th><th>Observação</th></tr></thead>
+          <tbody id="tb-reforma"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- --------------------------------------------------- incentivos -->
+    <section id="tela-incentivos" class="pagina aba-oculta">
+      <div class="aviso">
+        <strong>§12 — limites de atuação</strong>
+        Evidência técnica e memória de cálculo. Nenhum incentivo chega a <em>ativo</em>
+        sem validação de parceiro licenciado.
+      </div>
+      <section><div class="funil" id="funil-resumo"></div></section>
+      <section class="cartao">
+        <header><h2>Funil de qualificação</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Incentivo</th><th>Requisitos</th><th>Etapa</th>
+            <th class="n">Economia estimada/ano</th><th>Reforma</th><th>Validação</th><th></th></tr></thead>
+          <tbody id="tb-incentivos"></tbody></table></div>
+      </section>
+    </section>
+
+    <!-- ------------------------------------------------------- vendor -->
+    <section id="tela-vendor" class="pagina aba-oculta">
+      <p class="dica">RF-DIST-008 — relatório ESG de cadeia de suprimentos, bilíngue,
+        para o vendor internacional. Consolida balanço de carbono, lastro documental
+        da reversa e o ciclo fechado com os ISPs parceiros (§8).</p>
+      <section class="cartao">
+        <header><h2>Gerar relatório</h2>
+          <div class="linha" style="margin:0">
+            <select id="sel-idioma" style="width:auto">
+              <option value="pt">Português</option><option value="en">English</option>
+            </select>
+            <button class="btn" id="btn-vendor">Gerar</button>
+          </div></header>
+        <div class="cartao__corpo"><div id="saida-vendor"></div></div>
+      </section>
+    </section>
+
+    <footer class="rodape-legal">
+      Documento de trabalho da DNS-TI Consultoria. Não constitui parecer jurídico ou contábil.
+    </footer>
+  </main>
+</div>
+<div id="toasts"></div>
+<script type="module" src="assets/js/app-dist.js"></script>
+</body>
+</html>

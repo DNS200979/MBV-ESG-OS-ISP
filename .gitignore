@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+*.log
+.env
+.env.*
+.vscode/
+.idea/
+
+# Nunca commitar chave de serviço do Supabase
+**/service_role*
+supabase/.temp/

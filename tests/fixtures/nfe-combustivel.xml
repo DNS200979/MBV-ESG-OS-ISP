@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+<NFe><infNFe Id="NFe42260112345678000195550010000012341000012348" versao="4.00">
+<ide><cUF>42</cUF><nNF>1234</nNF><serie>1</serie><dhEmi>2026-01-15T10:30:00-03:00</dhEmi><natOp>VENDA DE COMBUSTIVEL</natOp></ide>
+<emit><CNPJ>12345678000195</CNPJ><xNome>POSTO ALFA COMBUSTIVEIS LTDA</xNome><enderEmit><UF>SC</UF></enderEmit></emit>
+<dest><CNPJ>11222333000181</CNPJ><xNome>ISP ALFA LTDA</xNome></dest>
+<det nItem="1"><prod><cProd>001</cProd><xProd>OLEO DIESEL S10</xProd><NCM>27101921</NCM><qCom>150.5000</qCom><uCom>LT</uCom><vProd>1204.00</vProd></prod></det>
+<det nItem="2"><prod><cProd>002</cProd><xProd>GASOLINA COMUM</xProd><NCM>27101259</NCM><qCom>80.0000</qCom><uCom>LT</uCom><vProd>512.00</vProd></prod></det>
+<det nItem="3"><prod><cProd>003</cProd><xProd>ARLA 32</xProd><NCM>31021010</NCM><qCom>2.0000</qCom><uCom>UN</uCom><vProd>60.00</vProd></prod></det>
+<total><ICMSTot><vNF>1776.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>

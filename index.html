@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CarbonFree Telecom — Painel</title>
+<meta name="description" content="Contabilidade de carbono e dossiê probatório fiscal para ISPs e distribuidores de telecom.">
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23127a55'/><text y='23' x='16' text-anchor='middle' font-size='18' fill='%23fff' font-family='sans-serif'>C</text></svg>">
+</head>
+<body>
+
+<!-- ================================================== configuração ausente -->
+<div id="tela-config" class="login aba-oculta">
+  <div class="login__cartao">
+    <h1>Configurar conexão</h1>
+    <p class="sub">O arquivo <code>assets/js/config.js</code> ainda está com os valores de exemplo.</p>
+    <div class="aviso">
+      <strong>Antes de usar</strong>
+      Preencha <code>supabaseUrl</code> e <code>supabaseKey</code> (chave <em>publishable</em>/anon)
+      em <code>assets/js/config.js</code>, ou informe abaixo para testar sem commitar credenciais.
+    </div>
+    <form id="form-config">
+      <label class="campo"><span>URL do projeto Supabase</span>
+        <input name="url" type="url" required placeholder="https://xxxxxxxx.supabase.co"></label>
+      <label class="campo"><span>Chave publishable (anon)</span>
+        <input name="key" required placeholder="sb_publishable_… ou eyJ…"></label>
+      <button class="btn" type="submit">Salvar e recarregar</button>
+    </form>
+    <p class="dica" style="margin-top:16px">
+      A chave publishable é pública por natureza — quem protege os dados é a RLS.
+      Nunca use aqui a <code>service_role</code>.
+    </p>
+  </div>
+</div>
+
+<!-- ============================================================== login -->
+<div id="tela-login" class="login aba-oculta">
+  <div class="login__cartao">
+    <h1>CarbonFree Telecom</h1>
+    <p class="sub">Dossiê probatório recorrente para ISPs e distribuidores.</p>
+
+    <form id="form-login">
+      <label class="campo"><span>E-mail</span>
+        <input name="email" type="email" required autocomplete="email"></label>
+      <label class="campo"><span>Senha</span>
+        <input name="senha" type="password" required minlength="8" autocomplete="current-password"></label>
+      <div class="linha" style="margin-top:16px">
+        <button class="btn" type="submit" data-acao="entrar">Entrar</button>
+        <button class="btn btn--sec" type="submit" data-acao="criar">Criar conta</button>
+      </div>
+    </form>
+
+    <p class="dica" style="margin-top:20px;margin-bottom:0">
+      Ao criar conta você poderá cadastrar sua empresa por CNPJ e começar
+      pela importação de documentos que já emite.
+    </p>
+  </div>
+</div>
+
+<!-- ================================================================ app -->
+<div id="app" class="shell aba-oculta">
+  <aside class="sidebar">
+    <div class="sidebar__marca">
+      <b>CarbonFree</b><span>Telecom</span>
+    </div>
+    <div class="sidebar__empresa" id="box-empresa"></div>
+    <nav id="nav">
+      <div class="grupo">Consolidado</div>
+      <button data-tela="painel">Painel</button>
+      <button data-tela="empresas">Empresas</button>
+      <button data-tela="vinculos">Vínculos ISP ↔ Distribuidor</button>
+      <div class="grupo">Governança</div>
+      <button data-tela="auditoria">Trilha de auditoria</button>
+      <button data-tela="catalogo">Catálogo de incentivos</button>
+    </nav>
+    <div class="sidebar__rodape">
+      <div id="box-usuario" style="margin-bottom:6px;color:var(--ink-400)"></div>
+      <button id="btn-sair">Sair</button>
+    </div>
+  </aside>
+
+  <main class="conteudo">
+    <div class="topo">
+      <h1 id="titulo">Painel</h1>
+      <p id="subtitulo"></p>
+    </div>
+
+    <!-- ------------------------------------------------------- painel -->
+    <section id="tela-painel" class="pagina">
+      <div class="aviso" id="aviso-validacao">
+        <strong>Nada aqui é parecer jurídico ou contábil (§12)</strong>
+        Os números são estimativa técnica com memória de cálculo. Um incentivo
+        só chega à etapa <em>ativo</em> depois de validado por parceiro licenciado.
+      </div>
+
+      <section>
+        <dl class="grade grade--4" id="kpis"></dl>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Balanço por empresa</h2>
+          <span class="selo selo--neutro">tCO₂e · exercício corrente</span></header>
+        <div class="tabela-wrap">
+          <table class="tabela">
+            <thead><tr>
+              <th>Empresa</th><th>Perfil</th><th>UF</th>
+              <th class="n">Passivo</th><th class="n">Ativo</th><th class="n">Líquido</th>
+              <th style="width:150px">Partidas</th><th></th>
+            </tr></thead>
+            <tbody id="tb-painel"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ----------------------------------------------------- empresas -->
+    <section id="tela-empresas" class="pagina aba-oculta">
+      <section class="cartao">
+        <header><h2>Cadastrar empresa por CNPJ</h2></header>
+        <div class="cartao__corpo">
+          <p class="dica">
+            RF-ISP-001 / RF-DIST-001 — o CNPJ é consultado na BrasilAPI e o CNAE
+            define o perfil setorial. Se a API estiver fora, os campos abrem para
+            preenchimento manual (degradação graciosa, §4.1).
+          </p>
+          <form id="form-empresa">
+            <div class="linha">
+              <label class="campo"><span>CNPJ</span>
+                <input name="cnpj" required inputmode="numeric" placeholder="00.000.000/0000-00"></label>
+              <button class="btn btn--sec" type="button" id="btn-consultar">Consultar</button>
+            </div>
+            <div class="linha" style="margin-top:12px">
+              <label class="campo" style="flex:2 1 280px"><span>Razão social</span>
+                <input name="razao_social" required></label>
+              <label class="campo"><span>UF</span>
+                <input name="uf" maxlength="2" style="text-transform:uppercase"></label>
+              <label class="campo"><span>Município</span><input name="municipio"></label>
+            </div>
+            <div class="linha" style="margin-top:12px">
+              <label class="campo"><span>CNAE principal</span><input name="cnae_principal"></label>
+              <label class="campo"><span>Perfil setorial</span>
+                <select name="perfil_setorial" required>
+                  <option value="isp">ISP — provedor de internet</option>
+                  <option value="distribuidor_telecom">Distribuidor de telecom</option>
+                </select></label>
+              <label class="campo"><span>Regime tributário</span>
+                <select name="regime">
+                  <option value="">—</option>
+                  <option value="simples">Simples Nacional</option>
+                  <option value="presumido">Lucro Presumido</option>
+                  <option value="real">Lucro Real</option>
+                </select></label>
+            </div>
+            <div class="linha" style="margin-top:12px">
+              <label class="campo"><span>Faturamento anual (R$)</span>
+                <input name="faturamento_anual" type="number" step="0.01" min="0"></label>
+              <label class="campo"><span>Assinantes (ISP)</span>
+                <input name="qtd_assinantes" type="number" min="0"></label>
+              <button class="btn" type="submit">Cadastrar</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Empresas com acesso</h2></header>
+        <div class="tabela-wrap">
+          <table class="tabela">
+            <thead><tr>
+              <th>Razão social</th><th>CNPJ</th><th>Perfil</th><th>UF</th>
+              <th>Regime</th><th class="n">Faturamento</th><th></th>
+            </tr></thead>
+            <tbody id="tb-empresas"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ----------------------------------------------------- vínculos -->
+    <section id="tela-vinculos" class="pagina aba-oculta">
+      <div class="aviso aviso--info">
+        <strong>Ciclo de sinergia ISP ↔ Distribuidor (§8)</strong>
+        O distribuidor só enxerga os dados do ISP depois que o ISP consente —
+        a regra é do banco, não da tela (RNF-001). O rateio do ativo de carbono
+        de cada lote de reversa usa o percentual definido aqui.
+      </div>
+
+      <section class="cartao">
+        <header><h2>Novo vínculo</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-vinculo" class="linha">
+            <label class="campo"><span>Distribuidor</span>
+              <select name="distribuidor_id" required></select></label>
+            <label class="campo"><span>ISP (CNPJ)</span>
+              <input name="isp_cnpj" required placeholder="somente dígitos"></label>
+            <label class="campo" style="flex:0 1 150px"><span>Rateio ISP (%)</span>
+              <input name="rateio_isp_pct" type="number" min="0" max="100" step="0.01" value="50"></label>
+            <button class="btn" type="submit">Solicitar vínculo</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Vínculos</h2></header>
+        <div class="tabela-wrap">
+          <table class="tabela">
+            <thead><tr>
+              <th>Distribuidor</th><th>ISP</th><th>Consentimento</th>
+              <th class="n">Rateio ISP</th><th></th>
+            </tr></thead>
+            <tbody id="tb-vinculos"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ---------------------------------------------------- auditoria -->
+    <section id="tela-auditoria" class="pagina aba-oculta">
+      <p class="dica">
+        RNF-005 — quem, quando e o quê, em cada escrita de lançamento, funil,
+        lote, DI, ativo e vínculo. A trilha é gravada por gatilho no banco e
+        é somente-leitura pela aplicação.
+      </p>
+      <section class="cartao">
+        <header><h2>Últimos eventos</h2>
+          <select id="sel-aud-empresa" style="max-width:280px"></select></header>
+        <div class="tabela-wrap">
+          <table class="tabela">
+            <thead><tr><th>Quando</th><th>Tabela</th><th>Operação</th><th>Registro</th></tr></thead>
+            <tbody id="tb-auditoria"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ----------------------------------------------------- catálogo -->
+    <section id="tela-catalogo" class="pagina aba-oculta">
+      <p class="dica">
+        Catálogo global de incentivos (§3). Cada linha carrega base legal,
+        situação frente à reforma tributária e selo de validação — nenhuma
+        economia é prometida antes de <em>validado</em> (§12.3).
+      </p>
+      <section class="cartao">
+        <div class="tabela-wrap">
+          <table class="tabela">
+            <thead><tr>
+              <th>Incentivo</th><th>Base legal</th><th>Esfera</th>
+              <th>Perfis</th><th>Reforma</th><th>Validação</th>
+            </tr></thead>
+            <tbody id="tb-catalogo"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <footer class="rodape-legal">
+      Documento de trabalho da DNS-TI Consultoria. Não constitui parecer jurídico
+      ou contábil. Fatores de emissão e parâmetros fiscais marcados como
+      <em>não validado</em> são provisórios (§17).
+    </footer>
+  </main>
+</div>
+
+<div id="toasts"></div>
+<script type="module" src="assets/js/app-index.js"></script>
+</body>
+</html>
