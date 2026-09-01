@@ -1,5 +1,5 @@
 -- =====================================================================
--- ERP CarbonFree Telecom — F0 Fundação
+-- MBV ESG OS ISP — F0 Fundação
 -- 01: extensões, schema privado, tipos, auditoria
 -- Ref.: docs/ESPECIFICACAO.md §9, §11 (RNF-002, RNF-005)
 -- =====================================================================

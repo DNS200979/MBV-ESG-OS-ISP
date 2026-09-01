@@ -358,7 +358,7 @@ async function montarDossie() {
     trilha_auditoria: (aud ?? []).map((a) => ({
       quando: a.ocorrido_em, tabela: a.tabela, operacao: a.operacao, registro: a.registro_id,
     })),
-    ressalva: 'Documento de evidência técnica emitido pela plataforma CarbonFree Telecom. '
+    ressalva: 'Documento de evidência técnica emitido pela plataforma MBV ESG OS ISP. '
             + 'NÃO constitui parecer jurídico ou contábil (§12). Valores marcados como '
             + '"não validado" são estimativas pendentes de conferência por parceiro licenciado.',
   };

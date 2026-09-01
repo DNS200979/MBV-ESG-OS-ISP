@@ -1,4 +1,8 @@
-# ERP CarbonFree Telecom
+# MBV ESG OS ISP
+
+> Nome comercial definido em set/2026 (era o pendente §17 da spec).
+> A especificação original em `docs/ESPECIFICACAO.md` mantém o nome de
+> trabalho "ERP CarbonFree Telecom" como registro histórico.
 
 Plataforma de contabilidade de carbono e dossiê probatório fiscal para o
 ecossistema de telecom — **Módulo 1 (ISP)** e **Módulo 2 (Distribuidor)**.
