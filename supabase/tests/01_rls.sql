@@ -158,6 +158,21 @@ begin
   end;
 end $$;
 
+-- T10: INSERT ... RETURNING funciona na criação de empresa (regressão:
+-- o PostgREST usa RETURNING em `return=representation`, e a policy de
+-- SELECT precisa aceitar a linha antes de o gatilho de membro disparar)
+select tst_como('22222222-2222-2222-2222-222222222222');
+do $$
+declare v_id uuid;
+begin
+  insert into empresas (cnpj, razao_social, uf, regime, tipo_operacao, perfil_setorial, criado_por)
+  values ('55666777000122','ISP Gama Returning','SC','real','isp','isp',
+          '22222222-2222-2222-2222-222222222222')
+  returning id into v_id;
+  assert v_id is not null, 'T10 FALHOU: RETURNING não devolveu a linha';
+  raise notice 'T10 ok — INSERT ... RETURNING passa na policy de SELECT';
+end $$;
+
 -- T9: trilha de auditoria registrou as escritas (RNF-005)
 select tst_admin();
 do $$
