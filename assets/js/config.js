@@ -17,8 +17,8 @@ const sobrescrita = (chave) => {
 };
 
 export const CONFIG = {
-  supabaseUrl: sobrescrita('cf.supabaseUrl') || 'https://SEU-PROJETO.supabase.co',
-  supabaseKey: sobrescrita('cf.supabaseKey') || 'SUA_CHAVE_PUBLISHABLE_AQUI',
+  supabaseUrl: sobrescrita('cf.supabaseUrl') || 'https://kyrivjhglgtxwecovtcd.supabase.co',
+  supabaseKey: sobrescrita('cf.supabaseKey') || 'sb_publishable_5Fj4eRcyn2dR6b210zDGHw_6R6JCbF9',
 
   // §4: BrasilAPI para CNPJ → CNAE → setor, com degradação graciosa
   brasilApiCnpj: 'https://brasilapi.com.br/api/cnpj/v1/',
