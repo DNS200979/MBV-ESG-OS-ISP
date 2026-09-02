@@ -183,4 +183,38 @@ begin
   raise notice 'T9 ok — trilha de auditoria gravando (RNF-005)';
 end $$;
 
+-- T11: geração de alertas (pg_cron chama private.fn_gerar_alertas)
+select tst_admin();
+insert into condicionantes_ttd (empresa_id, enquadramento, descricao, periodicidade, proximo_prazo)
+values (current_setting('tst.isp')::uuid, 'TTD 409', 'Recolhimento ao fundo estadual',
+        'mensal', current_date - 1);
+
+do $$
+declare v_status text; v_alertas int;
+begin
+  perform private.fn_gerar_alertas();
+
+  select status into v_status from condicionantes_ttd
+   where empresa_id = current_setting('tst.isp')::uuid;
+  assert v_status = 'atrasada', format('T11 FALHOU: status = %s', v_status);
+
+  select count(*) into v_alertas from alertas
+   where empresa_id = current_setting('tst.isp')::uuid and severidade = 'critico';
+  assert v_alertas = 1, format('T11 FALHOU: %s alertas críticos', v_alertas);
+
+  -- idempotência: rodar de novo não duplica
+  perform private.fn_gerar_alertas();
+  select count(*) into v_alertas from alertas
+   where empresa_id = current_setting('tst.isp')::uuid;
+  assert v_alertas = 1, 'T11 FALHOU: alerta duplicado na segunda execução';
+  raise notice 'T11 ok — condicionante vencida vira atrasada e gera alerta único';
+end $$;
+
+-- T12: alerta respeita RLS (ISP-B não vê alerta do ISP-A)
+select tst_como('22222222-2222-2222-2222-222222222222');
+do $$ begin
+  assert (select count(*) from alertas) = 0, 'T12 FALHOU: alerta vazou entre empresas';
+  raise notice 'T12 ok — alertas isolados por empresa';
+end $$;
+
 rollback;

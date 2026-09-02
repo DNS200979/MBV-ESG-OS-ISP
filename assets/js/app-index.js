@@ -246,6 +246,8 @@ async function renderPainel() {
       <dd style="font-size:21px">${ui.fmtMoeda(realizada)}</dd>
       <div class="rodape">${emValidacao} tese(s) na etapa de validação</div></div>`;
 
+  await renderAlertas();
+
   ui.preencherTabela($('#tb-painel'), linhas, ({ e, b }) => `
     <tr>
       <td><strong>${ui.esc(e.razao_social)}</strong></td>
@@ -261,6 +263,40 @@ async function renderPainel() {
 
   $$('#tb-painel [data-abrir-link]').forEach((a) =>
     a.addEventListener('click', () => definirEmpresaAtiva(a.dataset.abrirLink)));
+}
+
+async function renderAlertas() {
+  const { data, error } = await sb.from('alertas')
+    .select('*, empresa:empresa_id(razao_social)')
+    .eq('lido', false)
+    .order('prazo', { ascending: true, nullsFirst: false })
+    .limit(50);
+  if (error) return ui.erro(error);
+
+  const NIVEL = {
+    critico: '<span class="selo selo--risco">crítico</span>',
+    aviso:   '<span class="selo selo--nao_validado">aviso</span>',
+    info:    '<span class="selo selo--neutro">info</span>',
+  };
+  const ordem = { critico: 0, aviso: 1, info: 2 };
+  (data ?? []).sort((a, b) => ordem[a.severidade] - ordem[b.severidade]);
+
+  ui.preencherTabela($('#tb-alertas'), data, (a) => `
+    <tr>
+      <td>${NIVEL[a.severidade] ?? a.severidade}</td>
+      <td><strong>${ui.esc(a.titulo)}</strong>
+        ${a.detalhe ? `<div style="font-size:11.5px;color:var(--ink-500);max-width:64ch">${ui.esc(a.detalhe)}</div>` : ''}</td>
+      <td>${ui.fmtData(a.prazo)}</td>
+      <td style="font-size:12px">${ui.esc(a.empresa?.razao_social ?? '—')}</td>
+      <td><button class="btn btn--peq btn--sec" data-lido="${a.id}">marcar lido</button></td>
+    </tr>`, 5, 'Nenhum alerta pendente — prazos em dia.');
+
+  $$('#tb-alertas [data-lido]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const { error } = await sb.from('alertas').update({ lido: true }).eq('id', b.dataset.lido);
+      if (error) return ui.erro(error);
+      renderAlertas();
+    }));
 }
 
 /* =========================================================== vínculos */

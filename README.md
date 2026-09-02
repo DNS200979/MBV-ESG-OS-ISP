@@ -63,7 +63,7 @@ SQL, ler logs e consultar advisors de segurança direto da sessão.
 | Extensão | Para quê | Quando |
 |---|---|---|
 | `pgcrypto` | `gen_random_uuid()` | **já usada** — habilitada na migração 01 |
-| `pg_cron` | alertas de prazo: condicionantes do TTD, habilitação no Fundo de Compensação, FORMP&D (§7.3) | F2 |
+| `pg_cron` | alertas de prazo: condicionantes do TTD, habilitação no Fundo de Compensação (§7.3) | **habilitado** — job `mbv-alertas-diarios`, 06:00 BRT (migração 10) |
 | `pg_net` | disparar webhook/e-mail quando um prazo vence | F2 |
 | `pg_trgm` | busca por serial/modelo no inventário de comodato quando passar de ~50k ativos | F3 |
 
@@ -233,10 +233,14 @@ Isto é a §17 da spec, com o estado real do código.
 - **Distância no CT-e**: o leiaute do CT-e **não traz km percorrido**. A tela pede
   a distância do lote e ela entra na memória de cálculo como *premissa declarada*,
   explicitada no dossiê. Estimativa por código de município é trabalho de F3.
-- **Pleitos de ex-tarifário**: a tabela `ex_tarifario_pleitos` existe e o
-  cruzamento por NCM funciona, mas o catálogo vem **vazio** — carregar as
-  resoluções Gecex/Camex vigentes (é dado que muda o tempo todo; carga via
-  `service_role`, não pela aplicação).
+- **Pleitos de ex-tarifário**: o catálogo vem com um **conjunto inicial
+  curado** de NCMs de telecom (seed 04, tudo `nao_validado` — o contexto é a
+  consolidação dos BIT vigentes na Res. Gecex 781/2025, com II a 0%). A lista
+  completa (1.100+ itens) é a planilha oficial do MDIC (gov.br/mdic → SDIC →
+  Ex-Tarifário → Estatísticas → vigentes), que o portal só entrega via
+  navegador; baixe-a, exporte como CSV e rode
+  `python3 tools/carregar_ex_tarifario.py vigentes.csv` — a carga é
+  idempotente e filtra os prefixos de NCM do setor.
 - **`lucro_no_exercicio`**: não é inferível dos documentos importados. O funil
   trata como *pendente de confirmação*, não como reprovação.
 - **Importação de 1.000 CT-e em ≤ 60 s (RNF-004)**: o loop atual é sequencial e
@@ -248,5 +252,6 @@ Isto é a §17 da spec, com o estado real do código.
 - [ ] Validação jurídica das teses fiscais (marcar `status_validacao`)
 - [ ] Confirmar convênios CONFAZ e adesões estaduais por UF
 - [ ] Fatores de emissão oficiais
-- [ ] Habilitar `pg_cron` para os alertas de prazo
+- [x] `pg_cron` habilitado — alertas diários de condicionantes e exposição à reforma
+- [ ] Carregar a planilha oficial completa de ex-tarifários (tools/carregar_ex_tarifario.py)
 - [ ] Rodar `supabase db advisors` no projeto real e tratar os apontamentos
