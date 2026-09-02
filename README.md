@@ -253,5 +253,5 @@ Isto é a §17 da spec, com o estado real do código.
 - [ ] Confirmar convênios CONFAZ e adesões estaduais por UF
 - [ ] Fatores de emissão oficiais
 - [x] `pg_cron` habilitado — alertas diários de condicionantes e exposição à reforma
-- [ ] Carregar a planilha oficial completa de ex-tarifários (tools/carregar_ex_tarifario.py)
+- [x] Planilha oficial de ex-tarifários carregada (Res. 912, corte de 14/08/2026 — 251 pleitos de telecom; recarregar a cada atualização do MDIC com tools/carregar_ex_tarifario.py)
 - [ ] Rodar `supabase db advisors` no projeto real e tratar os apontamentos

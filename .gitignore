@@ -9,3 +9,7 @@ node_modules/
 # Nunca commitar chave de serviço do Supabase
 **/service_role*
 supabase/.temp/
+
+# Planilha oficial do MDIC — baixar da fonte, carregar com tools/carregar_ex_tarifario.py
+Ex-Tarif*rios*.xlsx
+*.xlsx

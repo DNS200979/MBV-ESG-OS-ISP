@@ -177,25 +177,33 @@ async function renderExTarifario() {
   ]);
 
   const hoje = ui.hoje();
+  // Um NCM costuma ter VÁRIOS Exs vigentes — agrupa e mostra a contagem;
+  // o enquadramento no Ex certo (descrição × bem importado) é do despachante.
   const porNcm = new Map();
   for (const p of pleitos ?? []) {
     if (p.vigencia_fim && p.vigencia_fim < hoje) continue;
-    if (!porNcm.has(p.ncm)) porNcm.set(p.ncm, p);
+    if (!porNcm.has(p.ncm)) porNcm.set(p.ncm, []);
+    porNcm.get(p.ncm).push(p);
   }
 
   ui.preencherTabela($('#tb-ncm'), ncms, (n) => {
-    const p = porNcm.get(n.ncm);
+    const ps = porNcm.get(n.ncm) ?? [];
+    const p = ps[0];
+    const fimMax = ps.reduce((a, x) => (x.vigencia_fim ?? '9999') > (a ?? '') ? x.vigencia_fim : a, null);
     return `<tr>
       <td class="num"><strong>${ui.esc(n.ncm)}</strong></td>
       <td>${ui.esc(n.descricao)}</td>
       <td class="n">${ui.fmtMoeda(n.volume_anual)}</td>
       <td>${p
-        ? `<span class="selo selo--ativo">oportunidade</span>
-           <div style="font-size:11.5px;color:var(--ink-500)">${ui.esc(p.ato_normativo ?? p.descricao)}</div>
-           ${ui.seloValidacao(p.validacao)}`
-        : '<span class="selo selo--neutro">sem pleito cadastrado</span>'}</td>
+        ? `<span class="selo selo--ativo">${ps.length} Ex vigente${ps.length > 1 ? 's' : ''}</span>
+           ${ui.seloValidacao(p.validacao)}
+           <div style="font-size:11.5px;color:var(--ink-500);max-width:48ch"
+                title="${ui.esc(ps.slice(0, 12).map((x) => x.descricao).join('\n'))}">
+             ${ui.esc(p.descricao.slice(0, 90))}${ps.length > 1 ? ' …' : ''}</div>
+           <div style="font-size:11px;color:var(--ink-400)">${ui.esc(p.ato_normativo ?? '')}</div>`
+        : '<span class="selo selo--neutro">sem pleito vigente</span>'}</td>
       <td class="n">${p?.aliquota_ii_reduzida != null ? `${ui.fmtNum(p.aliquota_ii_reduzida, 2)}%` : '—'}</td>
-      <td>${p ? `${ui.fmtData(p.vigencia_ini)} → ${ui.fmtData(p.vigencia_fim)}` : '—'}</td>
+      <td>${p ? `até ${ui.fmtData(fimMax)}` : '—'}</td>
     </tr>`;
   }, 6, 'Adicione NCMs do seu portfólio para cruzar com os pleitos.');
 }
