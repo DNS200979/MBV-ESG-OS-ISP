@@ -386,4 +386,40 @@ begin
   end;
 end $$;
 
+-- T21: peso do lote vem do catálogo, com composição por procedência
+select tst_como('11111111-1111-1111-1111-111111111111');
+do $$
+declare v_emp uuid; v_lote uuid; v_peso numeric; v_comp jsonb; v_prelim boolean;
+begin
+  insert into empresas (cnpj, razao_social, uf, regime, tipo_operacao, perfil_setorial, criado_por)
+  values ('77000770000177','ISP Catálogo','SC','real','isp','isp',
+          '11111111-1111-1111-1111-111111111111')
+  returning id into v_emp;
+
+  insert into produtos (empresa_id, modelo, ncm, peso_kg, peso_fonte)
+  values (v_emp, 'ONU GPON X1', '85176259', 0.42, 'pesagem_propria');
+  insert into pesos_referencia (empresa_id, ncm, peso_kg, fonte)
+  values (v_emp, '85176249', 3.8, 'catalogo_fabricante');
+
+  insert into ativos_equipamento (serial, modelo, ncm, isp_id, estado) values
+    ('CAT-1','ONU GPON X1','85176259', v_emp,'descarte'),
+    ('CAT-2','ONU GPON X1','85176259', v_emp,'descarte'),
+    ('CAT-3','OLT 8P','85176249',      v_emp,'descarte'),
+    ('CAT-4','Sem catálogo','99999999',v_emp,'descarte');
+
+  v_lote := formar_lote_reversa(v_emp, null, null, 0.35);
+  select peso_kg, peso_composicao, peso_estimado
+    into v_peso, v_comp, v_prelim
+    from lotes_reversa where id = v_lote;
+
+  -- 0,42×2 (pesagem própria) + 3,8 (catálogo) + 0,35 (estimado) = 4,99
+  assert v_peso = 4.99, format('T21 FALHOU: peso %s (esperado 4.99)', v_peso);
+  assert (v_comp->'pesagem_propria'->>'unidades')::int = 2,
+         'T21 FALHOU: composição não separou a pesagem própria';
+  assert (v_comp->'estimado'->>'unidades')::int = 1,
+         'T21 FALHOU: composição não isolou o item estimado';
+  assert v_prelim, 'T21 FALHOU: lote com item estimado deveria sair preliminar';
+  raise notice 'T21 ok — peso somado do catálogo; estimativa isolada e lote marcado preliminar';
+end $$;
+
 rollback;

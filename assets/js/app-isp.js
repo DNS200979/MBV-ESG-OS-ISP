@@ -8,6 +8,8 @@ import { lancar, balanco, lancamentos, fecharCompetencia, fechamentos,
 import { funilDaEmpresa, salvarFunil, simularRegimes, PARAMETROS_FISCAIS } from './fiscal.js';
 import { lerNFe, lerLote } from './xml.js';
 import * as rev from './reversa.js';
+import * as imp from './importador.js';
+import * as impio from './importador-io.js';
 import * as ui from './ui.js';
 
 const $  = (s, r = document) => r.querySelector(s);
@@ -40,6 +42,9 @@ const CATS = categoriasDoPerfil('isp');
     frota:      ['Frota', 'NF-e de combustível — escopo 1'],
     comodato:   ['Comodato & inventário', 'Ativo de rede agora, triagem e destinação'],
     destinadores: ['Destinadores', 'Quem recebe o equipamento — com licença conferida'],
+    produtos:   ['Catálogo de produtos', 'Peso e carbono incorporado com procedência'],
+    importar:   ['Importar planilhas', 'CSV, XLSX e XML com de-para assistido'],
+    conectores: ['Conectores ERP/CRM', 'Integração por token com escopo restrito'],
     incentivos: ['Incentivos', 'Funil de qualificação e dossiê probatório'],
     simulador:  ['Simulador de regime', 'Simples × Presumido × Real, com e sem reforma'],
     pd:         ['Projetos P&D', 'Lei do Bem — evidência técnica'],
@@ -703,6 +708,447 @@ async function abrirDestinador(existente = null) {
   renderDestinadores();
 }
 
+/* ============================================================= produtos */
+const FONTE_ROTULO = {
+  pesagem_propria: 'pesagem própria', epd_fabricante: 'EPD do fabricante',
+  catalogo_fabricante: 'catálogo do fabricante', erp: 'ERP', planilha: 'planilha',
+  estimado: 'estimado',
+};
+const FONTE_NIVEL = {
+  pesagem_propria: 'validado', epd_fabricante: 'validado',
+  catalogo_fabricante: 'em_validacao', erp: 'em_validacao',
+  planilha: 'nao_validado', estimado: 'risco',
+};
+
+async function renderProdutos() {
+  const [{ data: prods }, { data: pesos }] = await Promise.all([
+    sb.from('produtos').select('*').eq('empresa_id', EMPRESA.id).order('modelo'),
+    sb.from('pesos_referencia').select('*').eq('empresa_id', EMPRESA.id).order('ncm'),
+  ]);
+
+  const lista = prods ?? [];
+  const comPeso = lista.filter((p) => p.peso_kg != null);
+  const confiaveis = comPeso.filter((p) => ['pesagem_propria', 'epd_fabricante'].includes(p.peso_fonte));
+  const comCarbono = lista.filter((p) => p.carbono_incorporado_tco2e != null);
+
+  $('#kpis-produtos').innerHTML = `
+    <div class="kpi kpi--fiscal"><dt>Produtos no catálogo</dt>
+      <dd>${ui.fmtInt(lista.length)}</dd>
+      <div class="rodape">${ui.fmtInt(pesos?.length ?? 0)} peso(s) de referência por NCM</div></div>
+    <div class="kpi kpi--ativo"><dt>Com peso cadastrado</dt>
+      <dd>${ui.fmtInt(comPeso.length)}</dd>
+      <div class="rodape">${lista.length ? Math.round(comPeso.length / lista.length * 100) : 0}% do catálogo</div></div>
+    <div class="kpi ${confiaveis.length === comPeso.length && comPeso.length ? 'kpi--ativo' : 'kpi--alerta'}">
+      <dt>Peso com prova</dt>
+      <dd>${ui.fmtInt(confiaveis.length)}</dd>
+      <div class="rodape">pesagem própria ou EPD do fabricante</div></div>
+    <div class="kpi"><dt>Com carbono incorporado</dt>
+      <dd>${ui.fmtInt(comCarbono.length)}</dd>
+      <div class="rodape">base do lançamento de refurb</div></div>`;
+
+  const busca = ($('#busca-produto').value ?? '').toLowerCase();
+  const visiveis = busca
+    ? lista.filter((p) => `${p.modelo} ${p.sku ?? ''} ${p.ncm ?? ''}`.toLowerCase().includes(busca))
+    : lista;
+
+  ui.preencherTabela($('#tb-produtos'), visiveis, (p) => `
+    <tr>
+      <td><strong>${ui.esc(p.modelo)}</strong>
+        ${p.fabricante ? `<div style="font-size:11.5px;color:var(--ink-500)">${ui.esc(p.fabricante)}</div>` : ''}</td>
+      <td class="num" style="font-size:11.5px">${ui.esc(p.sku ?? '—')}
+        ${p.gtin ? `<div style="color:var(--ink-400)">${ui.esc(p.gtin)}</div>` : ''}</td>
+      <td class="num">${ui.esc(p.ncm ?? '—')}</td>
+      <td style="font-size:12px">${ui.esc((p.categoria_reversa ?? '—').replace(/_/g, ' '))}</td>
+      <td class="n">${p.peso_kg != null ? `${ui.fmtNum(p.peso_kg, 3)} kg` : '—'}</td>
+      <td>${p.peso_fonte
+        ? `<span class="selo selo--${FONTE_NIVEL[p.peso_fonte]}">${FONTE_ROTULO[p.peso_fonte]}</span>`
+        : '<span class="selo selo--risco">sem peso</span>'}</td>
+      <td class="n">${p.carbono_incorporado_tco2e != null ? ui.fmtNum(p.carbono_incorporado_tco2e, 4) : '—'}</td>
+      <td><button class="btn btn--peq btn--sec" data-edit-prod="${p.id}">editar</button></td>
+    </tr>`, 8, 'Catálogo vazio — cadastre ou importe uma planilha.');
+
+  $$('#tb-produtos [data-edit-prod]').forEach((b) =>
+    b.addEventListener('click', () => abrirProduto(lista.find((p) => p.id === b.dataset.editProd))));
+
+  ui.preencherTabela($('#tb-pesos-ncm'), pesos, (r) => `
+    <tr><td class="num">${ui.esc(r.ncm)}</td><td>${ui.esc(r.descricao ?? '—')}</td>
+      <td class="n">${ui.fmtNum(r.peso_kg, 3)}</td>
+      <td><span class="selo selo--${FONTE_NIVEL[r.fonte]}">${FONTE_ROTULO[r.fonte]}</span></td></tr>`,
+    4, 'Nenhum peso de referência.');
+}
+
+async function abrirProduto(existente = null) {
+  const salvo = await ui.wizard({
+    titulo: existente ? `Produto — ${existente.modelo}` : 'Cadastrar produto',
+    estadoInicial: existente ? { ...existente } : {},
+    etapas: [
+      {
+        titulo: 'Identificação',
+        render: (e) => `
+          <label class="campo"><span>Modelo / descrição</span>
+            <input name="modelo" required value="${ui.esc(e.modelo ?? '')}"></label>
+          <div class="linha">
+            <label class="campo"><span>SKU / código interno</span>
+              <input name="sku" value="${ui.esc(e.sku ?? '')}"></label>
+            <label class="campo"><span>GTIN / EAN</span>
+              <input name="gtin" inputmode="numeric" value="${ui.esc(e.gtin ?? '')}"></label>
+            <label class="campo" style="flex:0 1 130px"><span>NCM</span>
+              <input name="ncm" maxlength="8" inputmode="numeric" value="${ui.esc(e.ncm ?? '')}"></label>
+          </div>
+          <div class="linha" style="margin-top:12px">
+            <label class="campo"><span>Fabricante</span>
+              <input name="fabricante" value="${ui.esc(e.fabricante ?? '')}"></label>
+            <label class="campo"><span>Categoria de reversa</span>
+              <select name="categoria_reversa">
+                <option value="">—</option>
+                ${['onu_roteador','olt_chassi','fonte_carregador','bateria','cabo_fibra','placa_eletronica','servidor','outro']
+                  .map((c) => `<option value="${c}"${e.categoria_reversa === c ? ' selected' : ''}>${c.replace(/_/g,' ')}</option>`).join('')}
+              </select></label>
+          </div>
+          <p class="dica">GTIN e SKU são as chaves de casamento com a NF-e: quanto mais
+            preenchido, mais item de nota resolve sozinho.</p>`,
+        aoSair: (el, e) => {
+          const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
+          if (!v('modelo')) { ui.toast('Modelo é obrigatório.', 'aviso'); return false; }
+          Object.assign(e, {
+            modelo: v('modelo'), sku: v('sku') || null,
+            gtin: v('gtin').replace(/\D/g, '') || null,
+            ncm: v('ncm').replace(/\D/g, '') || null,
+            fabricante: v('fabricante') || null,
+            categoria_reversa: v('categoria_reversa') || null,
+          });
+        },
+      },
+      {
+        titulo: 'Peso',
+        render: (e) => `
+          <p class="dica">A procedência importa tanto quanto o número: é ela que decide
+            se o dossiê do lote sai como definitivo ou preliminar.</p>
+          <div class="linha">
+            <label class="campo"><span>Peso (kg)</span>
+              <input name="peso_kg" type="number" step="0.0001" min="0" value="${e.peso_kg ?? ''}"></label>
+            <label class="campo"><span>Procedência</span>
+              <select name="peso_fonte">
+                <option value="">—</option>
+                ${Object.entries(FONTE_ROTULO).map(([k, r]) =>
+                  `<option value="${k}"${e.peso_fonte === k ? ' selected' : ''}>${r}</option>`).join('')}
+              </select></label>
+            <label class="campo"><span>Medido em</span>
+              <input name="peso_medido_em" type="date" value="${e.peso_medido_em ?? ''}"></label>
+          </div>
+          <div class="aviso" style="margin-top:14px">
+            <strong>Ordem de força da prova</strong>
+            pesagem própria &gt; EPD do fabricante &gt; catálogo comercial &gt; ERP &gt;
+            planilha &gt; estimado. Só as duas primeiras sustentam número em dossiê.
+          </div>`,
+        aoSair: (el, e) => {
+          const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
+          const peso = v('peso_kg');
+          if (peso && !(Number(peso) > 0)) { ui.toast('Peso deve ser maior que zero.', 'aviso'); return false; }
+          if (peso && !v('peso_fonte')) { ui.toast('Informe a procedência do peso.', 'aviso'); return false; }
+          Object.assign(e, {
+            peso_kg: peso ? Number(peso) : null,
+            peso_fonte: v('peso_fonte') || null,
+            peso_medido_em: v('peso_medido_em') || null,
+          });
+        },
+      },
+      {
+        titulo: 'Carbono e vida útil',
+        render: (e) => `
+          <div class="linha">
+            <label class="campo"><span>Carbono incorporado (tCO₂e/unidade)</span>
+              <input name="carbono" type="number" step="0.000001" min="0"
+                     value="${e.carbono_incorporado_tco2e ?? ''}"></label>
+            <label class="campo"><span>Procedência</span>
+              <select name="carbono_fonte">
+                <option value="">—</option>
+                ${Object.entries(FONTE_ROTULO).map(([k, r]) =>
+                  `<option value="${k}"${e.carbono_fonte === k ? ' selected' : ''}>${r}</option>`).join('')}
+              </select></label>
+          </div>
+          <div class="linha" style="margin-top:12px">
+            <label class="campo"><span>Vida útil (meses)</span>
+              <input name="vida" type="number" min="1" value="${e.vida_util_meses ?? ''}"></label>
+            <label class="campo"><span>Valor de referência (R$)</span>
+              <input name="valor" type="number" step="0.01" min="0" value="${e.valor_referencia ?? ''}"></label>
+          </div>
+          <p class="dica">O carbono incorporado por unidade é o que dá lastro ao
+            lançamento de refurb — hoje o motor usa um fator genérico marcado como
+            provisório. Com a EPD do fabricante em mãos, o número passa a ser do produto.</p>`,
+        aoSair: (el, e) => {
+          const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
+          Object.assign(e, {
+            carbono_incorporado_tco2e: v('carbono') ? Number(v('carbono')) : null,
+            carbono_fonte: v('carbono_fonte') || null,
+            vida_util_meses: v('vida') ? Number(v('vida')) : null,
+            valor_referencia: v('valor') ? Number(v('valor')) : null,
+          });
+        },
+      },
+    ],
+    aoConcluir: async (e) => {
+      const linha = {
+        empresa_id: EMPRESA.id, modelo: e.modelo, sku: e.sku, gtin: e.gtin, ncm: e.ncm,
+        fabricante: e.fabricante, categoria_reversa: e.categoria_reversa,
+        peso_kg: e.peso_kg, peso_fonte: e.peso_fonte, peso_medido_em: e.peso_medido_em,
+        carbono_incorporado_tco2e: e.carbono_incorporado_tco2e, carbono_fonte: e.carbono_fonte,
+        vida_util_meses: e.vida_util_meses, valor_referencia: e.valor_referencia,
+        validacao: ['pesagem_propria', 'epd_fabricante'].includes(e.peso_fonte)
+          ? 'em_validacao' : 'nao_validado',
+      };
+      const q = existente
+        ? sb.from('produtos').update(linha).eq('id', existente.id)
+        : sb.from('produtos').insert(linha);
+      const { error } = await q;
+      if (error) throw error;
+      return true;
+    },
+  });
+  if (salvo) { ui.toast('Produto salvo.'); renderProdutos(); }
+}
+
+/* ============================================================ importar */
+async function renderImportar() {
+  $('#sel-alvo').innerHTML = Object.entries(imp.ALVOS)
+    .map(([k, v]) => `<option value="${k}">${ui.esc(v.rotulo)}</option>`).join('');
+
+  const hist = await impio.historicoImportacoes(EMPRESA.id);
+  const COR = { concluida: 'validado', parcial: 'nao_validado', falhou: 'risco', processando: 'neutro' };
+
+  ui.preencherTabela($('#tb-importacoes'), hist, (h) => `
+    <tr>
+      <td class="num" style="font-size:11.5px">${new Date(h.criado_em).toLocaleString('pt-BR')}</td>
+      <td>${ui.esc(imp.ALVOS[h.alvo]?.rotulo ?? h.alvo)}</td>
+      <td><span class="selo selo--neutro">${ui.esc(h.origem)}</span>
+        ${h.conector ? `<div style="font-size:11px;color:var(--ink-400)">${ui.esc(h.conector.nome)}</div>` : ''}</td>
+      <td style="font-size:12px">${ui.esc(h.nome_arquivo ?? '—')}</td>
+      <td class="n">${h.total_linhas}</td>
+      <td class="n">${h.criados}</td>
+      <td class="n"${h.erros ? ' style="color:var(--rubro-600)"' : ''}>${h.erros}</td>
+      <td><span class="selo selo--${COR[h.status]}">${h.status}</span></td>
+      <td>${h.erros ? `<button class="btn btn--peq btn--sec" data-rel="${h.id}">ver erros</button>` : ''}</td>
+    </tr>`, 9, 'Nenhuma importação ainda.');
+
+  $$('#tb-importacoes [data-rel]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const h = hist.find((x) => x.id === b.dataset.rel);
+      ui.modal({
+        titulo: `Erros da importação — ${imp.ALVOS[h.alvo]?.rotulo ?? h.alvo}`,
+        corpo: `<div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th class="n">Linha</th><th>Problema</th></tr></thead>
+          <tbody>${(h.relatorio ?? []).map((r) => `<tr>
+            <td class="n">${r.linha}</td><td style="font-size:12px">${ui.esc(r.erro)}</td>
+          </tr>`).join('')}</tbody></table></div>`,
+      });
+    }));
+}
+
+async function abrirImportacao(alvo, arquivo) {
+  let lido;
+  try {
+    lido = await imp.lerArquivo(arquivo);
+  } catch (e) { return ui.erro(e); }
+
+  if (!lido.linhas.length) return ui.toast('Arquivo sem linhas de dados.', 'aviso');
+
+  const def = imp.ALVOS[alvo];
+  const feito = await ui.wizard({
+    titulo: `Importar — ${def.rotulo}`,
+    estadoInicial: { mapa: imp.sugerirMapeamento(lido.cabecalho, alvo) },
+    etapas: [
+      {
+        titulo: 'Colunas',
+        render: (e) => `
+          <p class="dica">${lido.linhas.length} linha(s) em <strong>${ui.esc(arquivo.name)}</strong>
+            (${lido.formato.toUpperCase()}). Confira o de-para sugerido:</p>
+          ${Object.entries(def.campos).map(([campo, cfg]) => `
+            <label class="campo"><span>${ui.esc(cfg.rotulo)}${cfg.obrigatorio ? ' *' : ''}</span>
+              <select data-campo="${campo}">
+                <option value="">— não importar —</option>
+                ${lido.cabecalho.map((c) => `<option value="${ui.esc(c)}"${
+                  e.mapa[campo] === c ? ' selected' : ''}>${ui.esc(c)}</option>`).join('')}
+              </select></label>`).join('')}`,
+        aoSair: (el, e) => {
+          e.mapa = {};
+          el.querySelectorAll('[data-campo]').forEach((s) => {
+            if (s.value) e.mapa[s.dataset.campo] = s.value;
+          });
+          const faltando = Object.entries(def.campos)
+            .filter(([k, c]) => c.obrigatorio && !e.mapa[k]).map(([, c]) => c.rotulo);
+          if (faltando.length) {
+            ui.toast(`Mapeie os campos obrigatórios: ${faltando.join(', ')}.`, 'aviso', 8000);
+            return false;
+          }
+          Object.assign(e, imp.converter({
+            linhas: lido.linhas, mapa: e.mapa, alvo, empresaId: EMPRESA.id,
+          }));
+        },
+      },
+      {
+        titulo: 'Conferência',
+        render: (e) => {
+          const cols = Object.keys(e.validos[0] ?? {}).filter((c) => !c.endsWith('_id')).slice(0, 6);
+          return `
+            <div class="linha" style="gap:18px;margin-bottom:14px">
+              <div><strong style="font-size:19px;color:var(--verde-600)">${e.validos.length}</strong>
+                <div style="font-size:12px;color:var(--ink-500)">prontos para gravar</div></div>
+              <div><strong style="font-size:19px;color:${e.erros.length ? 'var(--rubro-600)' : 'var(--ink-400)'}">${e.erros.length}</strong>
+                <div style="font-size:12px;color:var(--ink-500)">com problema</div></div>
+            </div>
+            ${e.validos.length ? `<h3>Amostra do que será gravado</h3>
+              <div class="tabela-wrap" style="max-height:190px;overflow:auto"><table class="tabela">
+                <thead><tr>${cols.map((c) => `<th>${ui.esc(c)}</th>`).join('')}</tr></thead>
+                <tbody>${e.validos.slice(0, 8).map((v) =>
+                  `<tr>${cols.map((c) => `<td style="font-size:12px">${ui.esc(v[c] ?? '—')}</td>`).join('')}</tr>`).join('')}
+                </tbody></table></div>` : ''}
+            ${e.erros.length ? `<h3 style="margin-top:16px">Linhas com problema</h3>
+              <div class="tabela-wrap" style="max-height:190px;overflow:auto"><table class="tabela">
+                <thead><tr><th class="n">Linha</th><th>Problema</th></tr></thead>
+                <tbody>${e.erros.slice(0, 30).map((x) =>
+                  `<tr><td class="n">${x.linha}</td><td style="font-size:12px">${ui.esc(x.erro)}</td></tr>`).join('')}
+                </tbody></table></div>
+              <p class="dica" style="margin-top:8px">As linhas boas são gravadas mesmo assim;
+                o relatório completo fica no histórico.</p>` : ''}`;
+        },
+        aoSair: (el, e) => {
+          if (!e.validos.length) { ui.toast('Nenhuma linha válida para gravar.', 'aviso'); return false; }
+        },
+      },
+    ],
+    aoConcluir: async (e) => impio.importar({
+      empresaId: EMPRESA.id, alvo, arquivo,
+      validos: e.validos, erros: e.erros, formato: lido.formato,
+    }),
+  });
+
+  if (!feito) return;
+  if (feito.erroGravacao) return ui.erro(new Error(feito.erroGravacao));
+  ui.toast(`${feito.gravados} registro(s) gravados`
+    + (feito.erros ? `, ${feito.erros} linha(s) com problema.` : '.'),
+    feito.erros ? 'aviso' : 'ok', 8000);
+  renderImportar();
+}
+
+/* ========================================================== conectores */
+async function renderConectores() {
+  const lista = await impio.listarConectores(EMPRESA.id);
+
+  ui.preencherTabela($('#tb-conectores'), lista, (c) => `
+    <tr${c.ativo ? '' : ' style="opacity:.5"'}>
+      <td><strong>${ui.esc(c.nome)}</strong>
+        <div style="font-size:11.5px;color:var(--ink-500)">${ui.esc(c.tipo)}</div></td>
+      <td>${ui.esc(c.sistema ?? '—')}</td>
+      <td class="num" style="font-size:11.5px">${ui.esc(c.token_prefixo)}…
+        <div style="color:var(--ink-400);font-size:11px">só o hash é guardado</div></td>
+      <td style="font-size:11.5px">${(c.escopos ?? []).join(', ')}</td>
+      <td class="n">${ui.fmtInt(c.total_recebido)}</td>
+      <td style="font-size:11.5px">${c.ultima_sync ? new Date(c.ultima_sync).toLocaleString('pt-BR') : 'nunca'}</td>
+      <td><button class="btn btn--peq ${c.ativo ? 'btn--risco' : 'btn--sec'}" data-toggle-con="${c.id}"
+            data-ativo="${c.ativo}">${c.ativo ? 'desativar' : 'reativar'}</button></td>
+    </tr>`, 7, 'Nenhum conector. Crie um para o ERP começar a enviar dados.');
+
+  $$('#tb-conectores [data-toggle-con]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const { error } = await sb.from('conectores')
+        .update({ ativo: b.dataset.ativo !== 'true' }).eq('id', b.dataset.toggleCon);
+      if (error) return ui.erro(error);
+      ui.toast('Conector atualizado.');
+      renderConectores();
+    }));
+
+  const base = `${new URL(sb.supabaseUrl).origin}/functions/v1/ingest`;
+  $('#doc-conector').innerHTML = `
+    <p class="dica">O ERP faz um POST para o endereço abaixo, com o token no cabeçalho.
+      A resposta traz o resultado linha a linha; reenviar o mesmo lote não duplica nada
+      (a gravação é idempotente pela chave natural de cada alvo).</p>
+    <pre style="background:var(--ink-50);padding:13px;border-radius:6px;overflow:auto;font-size:11.5px">POST ${ui.esc(base)}
+Content-Type: application/json
+x-conector-token: mbv_...
+
+{
+  "alvo": "produtos",
+  "registros": [
+    { "sku": "ONU-100", "modelo": "ONU GPON 1GE", "ncm": "85176259",
+      "peso_kg": 0.42, "gtin": "7891234567890" }
+  ]
+}</pre>
+    <h3 style="margin-top:16px">Alvos disponíveis</h3>
+    <div class="tabela-wrap"><table class="tabela">
+      <thead><tr><th>Alvo</th><th>O que é</th><th>Campos obrigatórios</th><th>Chave (não duplica)</th></tr></thead>
+      <tbody>${Object.entries(imp.ALVOS).map(([k, v]) => `<tr>
+        <td class="num">${k}</td><td>${ui.esc(v.rotulo)}</td>
+        <td style="font-size:12px">${Object.entries(v.campos)
+          .filter(([, c]) => c.obrigatorio).map(([n]) => n).join(', ') || '—'}</td>
+        <td class="num" style="font-size:11.5px">${ui.esc(v.conflito.replace('empresa_id,', ''))}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+async function abrirConector() {
+  const r = await ui.wizard({
+    titulo: 'Novo conector',
+    etapas: [
+      {
+        titulo: 'Sistema',
+        render: () => `
+          <div class="linha">
+            <label class="campo"><span>Nome do conector</span>
+              <input name="nome" required placeholder="ERP financeiro, WMS do CD…"></label>
+            <label class="campo"><span>Tipo</span>
+              <select name="tipo">
+                <option value="erp">ERP</option><option value="crm">CRM</option>
+                <option value="wms">WMS</option><option value="webhook">Webhook</option>
+                <option value="outro">Outro</option>
+              </select></label>
+          </div>
+          <label class="campo" style="margin-top:12px"><span>Sistema (opcional)</span>
+            <input name="sistema" placeholder="Omie, Bling, Tiny, TOTVS, SAP, Salesforce…"></label>`,
+        aoSair: (el, e) => {
+          const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
+          if (!v('nome')) { ui.toast('Dê um nome ao conector.', 'aviso'); return false; }
+          Object.assign(e, { nome: v('nome'), tipo: v('tipo'), sistema: v('sistema') || null });
+        },
+      },
+      {
+        titulo: 'Escopos',
+        render: () => `
+          <p class="dica">Marque só o que este sistema precisa escrever. Um conector de
+            catálogo não deve conseguir mexer no inventário.</p>
+          <div class="opcoes">
+            ${Object.entries(imp.ALVOS).map(([k, v]) => `
+              <label class="opcao"><input type="checkbox" name="escopo" value="${k}"
+                ${k === 'produtos' ? 'checked' : ''}>
+                <div><strong>${ui.esc(v.rotulo)}</strong><span>${k}</span></div></label>`).join('')}
+          </div>`,
+        aoSair: (el, e) => {
+          e.escopos = [...el.querySelectorAll('[name=escopo]:checked')].map((c) => c.value);
+          if (!e.escopos.length) { ui.toast('Escolha ao menos um escopo.', 'aviso'); return false; }
+        },
+      },
+    ],
+    aoConcluir: async (e) => impio.criarConector({
+      empresaId: EMPRESA.id, nome: e.nome, tipo: e.tipo, sistema: e.sistema, escopos: e.escopos,
+    }),
+  });
+
+  if (!r) return;
+  await ui.modal({
+    titulo: 'Token criado — copie agora',
+    rotuloOk: 'Já copiei',
+    corpo: `
+      <div class="aviso"><strong>Este token aparece uma única vez</strong>
+        O servidor guarda apenas o hash. Se você perder o valor, não há como
+        recuperá-lo — só gerar um novo conector.</div>
+      <label class="campo"><span>Token do conector "${ui.esc(r.conector.nome)}"</span>
+        <input value="${ui.esc(r.token)}" readonly onclick="this.select()"
+               style="font-family:var(--mono);font-size:12px"></label>
+      <p class="dica">Configure no seu ERP como cabeçalho
+        <code>x-conector-token</code>. Escopos: ${(r.conector.escopos ?? []).join(', ')}.</p>`,
+  });
+  renderConectores();
+}
+
 /* ========================================================== incentivos */
 async function renderIncentivos() {
   FUNIL = await funilDaEmpresa(EMPRESA);
@@ -1106,6 +1552,33 @@ function ligarFormularios() {
   $('#filtro-estado').addEventListener('change', () => renderComodato().catch(ui.erro));
   $('#btn-formar-lote').addEventListener('click', () => abrirFormarLote().catch(ui.erro));
   $('#btn-novo-destinador').addEventListener('click', () => abrirDestinador().catch(ui.erro));
+  $('#btn-novo-produto').addEventListener('click', () => abrirProduto().catch(ui.erro));
+  $('#busca-produto').addEventListener('input', () => renderProdutos().catch(ui.erro));
+  $('#btn-novo-conector').addEventListener('click', () => abrirConector().catch(ui.erro));
+
+  /* --- importação de planilhas --- */
+  $('#arq-import').addEventListener('change', (ev) => {
+    $('#btn-importar').disabled = !ev.target.files[0];
+  });
+  $('#btn-importar').addEventListener('click', () => {
+    const arq = $('#arq-import').files[0];
+    if (arq) abrirImportacao($('#sel-alvo').value, arq).catch(ui.erro);
+  });
+
+  /* --- peso por NCM --- */
+  $('#btn-novo-peso-ncm').addEventListener('click', async () => {
+    const ncm = prompt('NCM (8 dígitos):')?.replace(/\D/g, '');
+    if (!ncm || ncm.length !== 8) return ui.toast('NCM precisa de 8 dígitos.', 'aviso');
+    const peso = prompt(`Peso médio em kg para o NCM ${ncm}:`);
+    const n = Number(String(peso ?? '').replace(',', '.'));
+    if (!(n > 0)) return ui.toast('Peso inválido.', 'aviso');
+    const { error } = await sb.from('pesos_referencia').upsert({
+      empresa_id: EMPRESA.id, ncm, peso_kg: n, fonte: 'estimado',
+    }, { onConflict: 'empresa_id,ncm' });
+    if (error) return ui.erro(error);
+    ui.toast('Peso de referência salvo.');
+    renderProdutos();
+  });
 
   /* --- NF-e de compra → inventário de rede --- */
   $('#form-nfe-equip').addEventListener('submit', async (ev) => {
@@ -1229,6 +1702,7 @@ function ligarFormularios() {
 const CARREGADORES = {
   dashboard: renderDashboard, energia: renderEnergia, frota: renderFrota,
   comodato: renderComodato, destinadores: renderDestinadores,
+  produtos: renderProdutos, importar: renderImportar, conectores: renderConectores,
   incentivos: renderIncentivos, simulador: renderSimulador,
   pd: renderPd, mrv: renderMrv, selo: renderSelo,
 };

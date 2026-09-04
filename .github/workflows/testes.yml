@@ -23,6 +23,8 @@ jobs:
         run: |
           npm i --no-save @xmldom/xmldom
           node tests/xml.test.mjs
+      - name: Importador CSV / XLSX / XML
+        run: node tests/importador.test.mjs
 
   banco:
     runs-on: ubuntu-latest

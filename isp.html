@@ -19,6 +19,10 @@
       <button data-tela="frota">Frota</button>
       <button data-tela="comodato">Comodato &amp; inventário</button>
       <button data-tela="destinadores">Destinadores</button>
+      <button data-tela="produtos">Catálogo de produtos</button>
+      <div class="grupo">Dados</div>
+      <button data-tela="importar">Importar planilhas</button>
+      <button data-tela="conectores">Conectores ERP/CRM</button>
       <div class="grupo">Fiscal</div>
       <button data-tela="incentivos">Incentivos</button>
       <button data-tela="simulador">Simulador de regime</button>
@@ -280,6 +284,98 @@
             <th>Licença ambiental</th><th>Categorias aceitas</th><th></th></tr></thead>
           <tbody id="tb-destinadores"></tbody>
         </table></div>
+      </section>
+    </section>
+
+    <!-- ------------------------------------------------------ produtos -->
+    <section id="tela-produtos" class="pagina aba-oculta">
+      <div class="aviso">
+        <strong>É aqui que o peso deixa de ser chute</strong>
+        Cada produto carrega peso, carbono incorporado e a <em>procedência</em> de
+        cada número. A formação de lote soma os pesos do catálogo e só estima o que
+        não estiver cadastrado — e diz explicitamente quanto da massa foi estimada.
+      </div>
+
+      <section><dl class="grade grade--4" id="kpis-produtos"></dl></section>
+
+      <section class="cartao">
+        <header><h2>Produtos</h2>
+          <div class="linha" style="margin:0">
+            <input id="busca-produto" placeholder="modelo, SKU ou NCM" style="max-width:220px">
+            <button class="btn btn--peq" id="btn-novo-produto">Cadastrar produto</button>
+          </div></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Modelo</th><th>SKU / GTIN</th><th>NCM</th><th>Categoria</th>
+            <th class="n">Peso</th><th>Procedência do peso</th><th class="n">Carbono</th><th></th></tr></thead>
+          <tbody id="tb-produtos"></tbody>
+        </table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Pesos por NCM (usados quando o produto não está cadastrado)</h2>
+          <button class="btn btn--peq btn--sec" id="btn-novo-peso-ncm">Adicionar</button></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>NCM</th><th>Descrição</th><th class="n">Peso (kg)</th><th>Fonte</th></tr></thead>
+          <tbody id="tb-pesos-ncm"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- ------------------------------------------------------ importar -->
+    <section id="tela-importar" class="pagina aba-oculta">
+      <p class="dica">Importa <strong>CSV, XLSX e XML</strong>. O arquivo original vira
+        documento-fonte com hash SHA-256 — a planilha ganha a mesma rastreabilidade de
+        uma NF-e. Erros são reportados linha a linha e nunca abortam o lote inteiro.</p>
+
+      <section class="cartao">
+        <header><h2>Nova importação</h2></header>
+        <div class="cartao__corpo">
+          <div class="linha">
+            <label class="campo"><span>O que você quer importar</span>
+              <select id="sel-alvo"></select></label>
+            <label class="campo"><span>Arquivo</span>
+              <input id="arq-import" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.xml"></label>
+            <button class="btn" id="btn-importar" disabled>Abrir assistente</button>
+          </div>
+          <p class="dica" style="margin:10px 0 0">
+            Não precisa formatar a planilha antes: o assistente detecta as colunas e
+            propõe o de-para, que você confere antes de gravar.
+          </p>
+        </div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Histórico de importações</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Quando</th><th>Alvo</th><th>Origem</th><th>Arquivo</th>
+            <th class="n">Linhas</th><th class="n">Gravados</th><th class="n">Erros</th><th>Status</th><th></th></tr></thead>
+          <tbody id="tb-importacoes"></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <!-- ---------------------------------------------------- conectores -->
+    <section id="tela-conectores" class="pagina aba-oculta">
+      <div class="aviso aviso--info">
+        <strong>Como o ERP conversa com a plataforma</strong>
+        Cada conector recebe um token próprio, com escopo restrito ao que ele pode
+        escrever. O token é gerado no seu navegador e o servidor guarda apenas o
+        hash — se o banco vazar, os tokens não vazam junto. Perdeu o token? Gere outro.
+      </div>
+
+      <section class="cartao">
+        <header><h2>Conectores</h2>
+          <button class="btn btn--peq" id="btn-novo-conector">Novo conector</button></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Nome</th><th>Sistema</th><th>Token</th><th>Escopos</th>
+            <th class="n">Recebidos</th><th>Última sincronização</th><th></th></tr></thead>
+          <tbody id="tb-conectores"></tbody>
+        </table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Contrato de integração</h2></header>
+        <div class="cartao__corpo" id="doc-conector"></div>
       </section>
     </section>
 

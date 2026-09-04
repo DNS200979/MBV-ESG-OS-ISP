@@ -141,7 +141,7 @@ Settings → Pages → Source: **GitHub Actions**. O push na `main` dispara
 
 ```
 index.html              Login, cadastro multiempresa, vínculos §8, auditoria, catálogo
-isp.html                Módulo 1 — 10 telas (§6.5 + P&D + MRV + destinadores)
+isp.html                Módulo 1 — 13 telas (§6.5 + P&D + MRV + destinadores + produtos + dados)
 dist.html               Módulo 2 — 8 telas (§7.5 + incentivos)
 
 assets/css/app.css      Design system único
@@ -154,14 +154,17 @@ assets/js/
   carbono.js            Motor de partidas dobradas + PERFIS_SETORIAIS
   fiscal.js             Funil de qualificação, simulador de regime, curva da reforma
   reversa.js            NF-e → inventário, triagem, destinadores, formação de lote
+  importador.js         Núcleo puro: parsers CSV/XLSX/XML, de-para, conversão
+  importador-io.js      Gravação das importações e gestão de conectores
   app-index.js          Lógica do painel
   app-isp.js            Lógica do Módulo 1
   app-dist.js           Lógica do Módulo 2
 
-supabase/migrations/    14 migrações — schema §9 + RLS + Storage + alertas + reversa
+supabase/migrations/    20 migrações — schema §9 + RLS + Storage + alertas + reversa + catálogo + conectores
+supabase/functions/     Edge Function `ingest` — endpoint do conector de ERP/CRM
 supabase/seed/          Catálogo de incentivos, fatores, curva da reforma
 supabase/tests/         Stub do ambiente Supabase + 10 testes de RLS
-tests/                  Testes dos parsers (18 asserções) + fixtures
+tests/                  Parsers (28 asserções) + importador (33 asserções) + fixtures
 docs/ESPECIFICACAO.md   A spec original
 ```
 
@@ -187,6 +190,9 @@ tela — a interface não é a última linha de defesa.
 | Lote não se forma vazio | `formar_lote_reversa()` | T15 |
 | Triagem é laudo — não se reescreve | sem `GRANT UPDATE` em `triagens` | T16 |
 | Destinadores e triagens isolados por empresa | RLS `pode_ver`/`pode_editar` | T18 |
+| Peso do lote vem do catálogo, com composição por procedência | `formar_lote_reversa()` | T21 |
+| Conector só escreve dentro do seu escopo | Edge Function `ingest` | E2E |
+| Token de conector nunca é guardado em claro | `token_hash` (SHA-256) | E2E |
 | Empresa pode ser removida por inteiro (RNF-007/LGPD) | ações de exclusão nas FKs + cascata no gatilho | T19 |
 | Exclusão avulsa de prova segue bloqueada | `fn_bloqueia_alteracao` | T20 |
 | Lançamento sem documento-fonte é recusado (§4.1) | `NOT NULL` na FK + guarda no motor | — |
@@ -249,7 +255,52 @@ O ciclo do §8 roda sem digitação manual:
 - **Cinco alertas novos**: retorno sem triagem, reparo fora do prazo, licença
   vencendo, massa em descarte sem lote, lote parado.
 
-### 6.3 Funcionalidades que ficaram para as próximas fases
+### 6.3 Peso rastreável, importação e conectores (entregue)
+
+O peso do lote deixou de ser estimativa cega:
+
+- **Catálogo de produtos** com peso, carbono incorporado e a *procedência* de cada
+  número (`pesagem_propria` > `epd_fabricante` > `catalogo_fabricante` > `erp` >
+  `planilha` > `estimado`). Só as duas primeiras sustentam número em dossiê.
+- **`formar_lote_reversa()`** soma os pesos do catálogo e estima só o que falta,
+  gravando a composição em `peso_composicao` — o dossiê consegue dizer "82% da
+  massa tem pesagem própria" em vez de apresentar um número redondo sem lastro.
+- **Resolução do produto** por GTIN → SKU → NCM+modelo → peso de referência por NCM,
+  registrando por qual chave casou.
+
+**Importação de planilhas** (CSV, XLSX, XML) com assistente de de-para:
+
+- CSV parseado internamente (RFC 4180: aspas, aspas escapadas, quebra dentro do
+  campo, separador detectado automaticamente); XLSX carrega o SheetJS sob demanda,
+  então quem só usa CSV não paga por essa dependência.
+- XML tabular genérico: encontra o elemento mais repetido e o trata como linha —
+  cobre exportação de ERP sem mapeamento de schema.
+- Números em formato BR e US, datas em dd/mm/aaaa e ISO.
+- O arquivo original vira documento-fonte com hash: a planilha ganha a mesma
+  rastreabilidade de uma NF-e.
+- Erro é reportado linha a linha e nunca aborta o lote (§10).
+
+**Conector de ERP/CRM** — Edge Function `ingest`:
+
+- Token gerado no navegador; o servidor guarda apenas o SHA-256. Um vazamento do
+  banco não vira acesso de escrita à conta do cliente.
+- Escopo por conector: um conector de catálogo não escreve inventário.
+- Idempotente por chave natural — reenviar o mesmo lote não duplica.
+- Toda chamada vira registro em `importacoes`, com relatório linha a linha.
+
+```
+POST https://kyrivjhglgtxwecovtcd.supabase.co/functions/v1/ingest
+x-conector-token: mbv_...
+
+{ "alvo": "produtos",
+  "registros": [ { "sku": "ONU-100", "modelo": "ONU GPON 1GE",
+                   "ncm": "85176259", "peso_kg": 0.42 } ] }
+```
+
+Alvos: `produtos`, `pesos_referencia`, `ativos`, `unidades_consumidoras`,
+`destinadores`, `portfolio_ncm`.
+
+### 6.4 Funcionalidades que ficaram para as próximas fases
 
 - **Dossiê em PDF nativo** (F4): hoje sai JSON assinável + versão imprimível.
 - **OCR de fatura de energia**: a importação é **assistida** — a fatura é
@@ -266,16 +317,16 @@ O ciclo do §8 roda sem digitação manual:
   navegador; baixe-a, exporte como CSV e rode
   `python3 tools/carregar_ex_tarifario.py vigentes.csv` — a carga é
   idempotente e filtra os prefixos de NCM do setor.
-- **Peso do lote de reversa** é estimado (default 0,35 kg/unidade ≈ ONU/roteador).
-  O peso é a base do ativo de carbono da reversa — substituir por pesagem real
-  do destinador assim que houver balança no fluxo.
+- **Peso ainda estimado onde o catálogo não cobre**: a estimativa de 0,35 kg/unidade
+  só entra para o que não tem produto nem peso de NCM cadastrado, e o lote sai
+  marcado como preliminar nesse caso. Cadastrar o catálogo elimina isso.
 - **`lucro_no_exercicio`**: não é inferível dos documentos importados. O funil
   trata como *pendente de confirmação*, não como reprovação.
 - **Importação de 1.000 CT-e em ≤ 60 s (RNF-004)**: o loop atual é sequencial e
   reporta o tempo na tela. Se o alvo não for atingido no volume real, a saída é
   paralelizar em lotes ou mover a importação para Edge Function.
 
-### 6.4 Antes de qualquer piloto
+### 6.5 Antes de qualquer piloto
 
 - [ ] Validação jurídica das teses fiscais (marcar `status_validacao`)
 - [ ] Confirmar convênios CONFAZ e adesões estaduais por UF
