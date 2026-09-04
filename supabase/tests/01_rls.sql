@@ -217,4 +217,173 @@ do $$ begin
   raise notice 'T12 ok — alertas isolados por empresa';
 end $$;
 
+-- =====================================================================
+-- Ciclo de logística reversa (migrações 11 e 12)
+-- =====================================================================
+select tst_como('11111111-1111-1111-1111-111111111111');
+
+-- T13: destinador com licença vencida bloqueia a formação de lote
+do $$
+declare v_dest uuid; v_ativo uuid;
+begin
+  insert into destinadores (empresa_id, cnpj, razao_social, tipo, licenca_ambiental, licenca_validade)
+  values (current_setting('tst.isp')::uuid, '12345678000199', 'Recicla Vencida ME',
+          'reciclador', 'LO-001/2020', current_date - 30)
+  returning id into v_dest;
+
+  insert into ativos_equipamento (serial, modelo, isp_id, estado)
+  values ('SN-TESTE-0001', 'ONU GPON', current_setting('tst.isp')::uuid, 'descarte')
+  returning id into v_ativo;
+
+  begin
+    perform formar_lote_reversa(current_setting('tst.isp')::uuid, v_dest);
+    raise exception 'T13 FALHOU: lote formado com licença vencida';
+  exception
+    when raise_exception then
+      if position('Licença ambiental' in sqlerrm) = 0 then raise; end if;
+      raise notice 'T13 ok — licença vencida impede formar lote';
+  end;
+
+  perform set_config('tst.dest', v_dest::text, true);
+end $$;
+
+-- T14: com licença vigente, o lote se forma e captura os ativos em descarte
+do $$
+declare v_dest uuid; v_lote uuid; v_qtd int; v_peso numeric;
+begin
+  insert into destinadores (empresa_id, cnpj, razao_social, tipo, licenca_ambiental, licenca_validade)
+  values (current_setting('tst.isp')::uuid, '98765432000111', 'Recicla Vigente SA',
+          'reciclador', 'LO-777/2026', current_date + 365)
+  returning id into v_dest;
+
+  insert into ativos_equipamento (serial, modelo, isp_id, estado)
+  values ('SN-TESTE-0002', 'ONU GPON', current_setting('tst.isp')::uuid, 'descarte');
+
+  v_lote := formar_lote_reversa(current_setting('tst.isp')::uuid, v_dest, null, 0.35);
+
+  select qtd_equipamentos, peso_kg into v_qtd, v_peso from lotes_reversa where id = v_lote;
+  assert v_qtd = 2, format('T14 FALHOU: lote com %s equipamentos', v_qtd);
+  assert v_peso = 0.70, format('T14 FALHOU: peso %s', v_peso);
+  assert (select count(*) from ativos_equipamento
+           where lote_reversa_id = v_lote) = 2, 'T14 FALHOU: ativos não vinculados ao lote';
+  raise notice 'T14 ok — lote formado, peso calculado e ativos vinculados';
+end $$;
+
+-- T15: formar lote sem nada em descarte é recusado
+do $$
+begin
+  begin
+    perform formar_lote_reversa(current_setting('tst.isp')::uuid);
+    raise exception 'T15 FALHOU: formou lote vazio';
+  exception
+    when raise_exception then
+      if position('Nenhum equipamento' in sqlerrm) = 0 then raise; end if;
+      raise notice 'T15 ok — lote vazio recusado';
+  end;
+end $$;
+
+-- T16: triagem é imutável (laudo não se reescreve)
+do $$
+declare v_ativo uuid;
+begin
+  insert into ativos_equipamento (serial, modelo, isp_id, estado)
+  values ('SN-TESTE-0003', 'Roteador AC', current_setting('tst.isp')::uuid, 'retorno')
+  returning id into v_ativo;
+
+  insert into triagens (ativo_id, empresa_id, destino, motivo, laudo)
+  values (v_ativo, current_setting('tst.isp')::uuid, 'reparo', 'defeito_reparavel', 'Fonte queimada');
+
+  -- Sem GRANT UPDATE, o banco recusa com erro explícito — melhor que
+  -- devolver "0 linhas" e deixar o usuário achar que salvou.
+  begin
+    update triagens set laudo = 'ALTERADO' where ativo_id = v_ativo;
+    raise exception 'T16 FALHOU: triagem foi editada';
+  exception
+    when insufficient_privilege then
+      raise notice 'T16 ok — triagem imutável (UPDATE recusado pelo banco)';
+  end;
+end $$;
+
+-- T17: alertas da reversa detectam retorno parado e licença vencida
+-- (o gatilho tg_ativos_touch reescreve atualizado_em em todo UPDATE — que é o
+--  comportamento certo, pois o alerta mede tempo desde a última mudança de
+--  estado. Por isso o cenário nasce com a data antiga já no INSERT.)
+select tst_admin();
+insert into ativos_equipamento (serial, modelo, isp_id, estado, atualizado_em)
+values ('SN-TESTE-0004', 'ONU parada', current_setting('tst.isp')::uuid, 'retorno',
+        now() - interval '40 days');
+
+do $$
+declare v_retorno int; v_licenca int;
+begin
+  perform private.fn_gerar_alertas_reversa();
+
+  select count(*) into v_retorno from alertas
+   where tipo = 'retorno_sem_triagem' and empresa_id = current_setting('tst.isp')::uuid;
+  select count(*) into v_licenca from alertas
+   where tipo = 'licenca_vencendo' and severidade = 'critico'
+     and empresa_id = current_setting('tst.isp')::uuid;
+
+  assert v_retorno = 1, format('T17 FALHOU: %s alertas de retorno parado', v_retorno);
+  assert v_licenca = 1, format('T17 FALHOU: %s alertas de licença vencida', v_licenca);
+
+  perform private.fn_gerar_alertas_reversa();
+  select count(*) into v_retorno from alertas
+   where tipo = 'retorno_sem_triagem' and empresa_id = current_setting('tst.isp')::uuid;
+  assert v_retorno = 1, 'T17 FALHOU: alerta de reversa duplicado';
+  raise notice 'T17 ok — alertas de reversa disparam e não duplicam';
+end $$;
+
+-- T18: destinador de outra empresa não vaza
+select tst_como('22222222-2222-2222-2222-222222222222');
+do $$ begin
+  assert (select count(*) from destinadores) = 0, 'T18 FALHOU: destinador vazou entre empresas';
+  assert (select count(*) from triagens) = 0, 'T18 FALHOU: triagem vazou entre empresas';
+  raise notice 'T18 ok — destinadores e triagens isolados por empresa';
+end $$;
+
+-- T19: remoção completa de empresa (RNF-007 portabilidade / LGPD).
+-- Regressão de dois bugs reais: o gatilho de imutabilidade bloqueava o
+-- DELETE em cascata, e 13 FKs estavam em NO ACTION.
+select tst_admin();
+do $$
+declare v_isp uuid; v_docs int; v_ativos int;
+begin
+  v_isp := current_setting('tst.isp')::uuid;
+
+  select count(*) into v_docs   from documentos_fonte    where empresa_id = v_isp;
+  select count(*) into v_ativos from ativos_equipamento  where isp_id     = v_isp;
+  assert v_docs > 0 and v_ativos > 0, 'T19: cenário sem dados para exercitar a cascata';
+
+  delete from empresas where id = v_isp;
+
+  assert (select count(*) from empresas where id = v_isp) = 0,
+         'T19 FALHOU: empresa não foi removida';
+  assert (select count(*) from documentos_fonte where empresa_id = v_isp) = 0,
+         'T19 FALHOU: documentos-fonte sobreviveram à remoção da empresa';
+  assert (select count(*) from ativos_equipamento where isp_id = v_isp) = 0,
+         'T19 FALHOU: isp_id não foi anulado nos ativos';
+  raise notice 'T19 ok — empresa removida em cascata (portabilidade/LGPD)';
+end $$;
+
+-- T20: fora da cascata, o documento-fonte segue indestrutível
+select tst_admin();
+do $$
+declare v_emp uuid; v_doc uuid;
+begin
+  insert into empresas (cnpj, razao_social, uf, regime, tipo_operacao, perfil_setorial)
+  values ('99888777000166','ISP Delta','SC','real','isp','isp') returning id into v_emp;
+  insert into documentos_fonte (empresa_id, tipo, hash_sha256)
+  values (v_emp, 'cte', repeat('b',64)) returning id into v_doc;
+
+  begin
+    delete from documentos_fonte where id = v_doc;
+    raise exception 'T20 FALHOU: documento-fonte avulso foi excluído';
+  exception
+    when raise_exception then
+      if position('não pode ser excluído' in sqlerrm) = 0 then raise; end if;
+      raise notice 'T20 ok — exclusão avulsa de prova segue bloqueada (RNF-002)';
+  end;
+end $$;
+
 rollback;

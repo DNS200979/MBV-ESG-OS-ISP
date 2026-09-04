@@ -1,12 +1,13 @@
 /* =====================================================================
  * isp.html — Módulo 1 (§6). Sete telas mais P&D e fechamento MRV.
  * ===================================================================== */
-import { sb, exigirSessao, empresaDeTrabalho, formataCnpj } from './db.js';
+import { sb, exigirSessao, empresaDeTrabalho, formataCnpj, consultaCnpj } from './db.js';
 import { registrarDocumento, listarDocumentos } from './docfonte.js';
 import { lancar, balanco, lancamentos, fecharCompetencia, fechamentos,
          categoriasDoPerfil, carregarFatores, fatorProvisorio } from './carbono.js';
 import { funilDaEmpresa, salvarFunil, simularRegimes, PARAMETROS_FISCAIS } from './fiscal.js';
 import { lerNFe, lerLote } from './xml.js';
+import * as rev from './reversa.js';
 import * as ui from './ui.js';
 
 const $  = (s, r = document) => r.querySelector(s);
@@ -37,7 +38,8 @@ const CATS = categoriasDoPerfil('isp');
     dashboard:  ['Dashboard', 'Balanço de carbono e economia fiscal'],
     energia:    ['Energia & POPs', 'Unidades consumidoras, faturas e oportunidade de GD'],
     frota:      ['Frota', 'NF-e de combustível — escopo 1'],
-    comodato:   ['Comodato', 'Ciclo de vida dos equipamentos em campo'],
+    comodato:   ['Comodato & inventário', 'Ativo de rede agora, triagem e destinação'],
+    destinadores: ['Destinadores', 'Quem recebe o equipamento — com licença conferida'],
     incentivos: ['Incentivos', 'Funil de qualificação e dossiê probatório'],
     simulador:  ['Simulador de regime', 'Simples × Presumido × Real, com e sem reforma'],
     pd:         ['Projetos P&D', 'Lei do Bem — evidência técnica'],
@@ -174,75 +176,531 @@ async function renderFrota() {
 }
 
 /* ============================================================ comodato */
-const ESTADOS = ['novo', 'em_campo', 'retorno', 'refurb', 'descarte'];
+const ESTADOS = ['novo', 'em_campo', 'retorno', 'triagem', 'reparo', 'refurb', 'descarte', 'baixado'];
+const ROTULO_ESTADO = {
+  novo: 'novo', em_campo: 'em campo', retorno: 'retorno', triagem: 'triagem',
+  reparo: 'reparo', refurb: 'refurb', descarte: 'descarte', baixado: 'baixado',
+};
+
+async function todosAtivos() {
+  const { data, error } = await sb.from('ativos_equipamento')
+    .select('*').eq('isp_id', EMPRESA.id)
+    .order('atualizado_em', { ascending: false }).limit(2000);
+  if (error) throw error;
+  return data ?? [];
+}
 
 async function renderComodato() {
-  const { data, error } = await sb.from('ativos_equipamento')
-    .select('*').eq('isp_id', EMPRESA.id).order('atualizado_em', { ascending: false }).limit(500);
-  if (error) throw error;
-  const lista = data ?? [];
+  const [lista, inventario, destinadores] = await Promise.all([
+    todosAtivos(), rev.inventarioRede(EMPRESA.id), rev.listarDestinadores(EMPRESA.id),
+  ]);
 
-  const contagem = Object.fromEntries(ESTADOS.map((e) => [e, lista.filter((a) => a.estado === e).length]));
+  const porEstado = Object.fromEntries(ESTADOS.map((e) => [e, lista.filter((a) => a.estado === e).length]));
+  const emCampo = porEstado.em_campo;
+  const provisorios = lista.filter((a) => a.serial_provisorio).length;
+  const valorTotal = lista.reduce((a, x) => a + Number(x.valor_aquisicao ?? 0), 0);
+  const reutilizados = lista.filter((a) => (a.ciclos_refurb ?? 0) > 0).length;
+
+  $('#kpis-inventario').innerHTML = `
+    <div class="kpi kpi--fiscal"><dt>Ativo de rede em campo</dt>
+      <dd>${ui.fmtInt(emCampo)}<small>un.</small></dd>
+      <div class="rodape">${ui.fmtInt(lista.length)} equipamentos no inventário</div></div>
+    <div class="kpi"><dt>Valor de aquisição</dt>
+      <dd style="font-size:21px">${ui.fmtMoeda(valorTotal)}</dd>
+      <div class="rodape">base das NF-e importadas</div></div>
+    <div class="kpi kpi--ativo"><dt>Reaproveitados</dt>
+      <dd>${ui.fmtInt(reutilizados)}<small>un.</small></dd>
+      <div class="rodape">CAPEX de reposição evitado</div></div>
+    <div class="kpi kpi--alerta"><dt>Seriais provisórios</dt>
+      <dd>${ui.fmtInt(provisorios)}<small>un.</small></dd>
+      <div class="rodape">${provisorios ? 'corrigir em campo' : 'inventário conferido'}</div></div>`;
+
   const total = lista.length || 1;
   $('#resumo-comodato').innerHTML = ESTADOS.map((e) => `
     <div class="funil__etapa">
-      <span>${e.replace('_', ' ')}</span>
-      <div class="trilho"><i style="width:${(contagem[e] / total * 100).toFixed(1)}%"></i></div>
-      <span class="num" style="text-align:right">${contagem[e]}</span>
+      <span>${ROTULO_ESTADO[e]}</span>
+      <div class="trilho"><i style="width:${(porEstado[e] / total * 100).toFixed(1)}%"></i></div>
+      <span class="num" style="text-align:right">${porEstado[e]}</span>
     </div>`).join('');
 
-  const filtro = ($('#busca-ativo').value ?? '').toLowerCase();
-  const visiveis = filtro
-    ? lista.filter((a) => `${a.serial} ${a.modelo ?? ''}`.toLowerCase().includes(filtro))
-    : lista;
+  /* --- fila de triagem --- */
+  const emRetorno = lista.filter((a) => a.estado === 'retorno');
+  $('#selo-triagem').textContent = `${emRetorno.length} aguardando decisão`;
+  ui.preencherTabela($('#tb-triagem'), emRetorno, (a) => {
+    const dias = Math.floor((Date.now() - new Date(a.atualizado_em)) / 864e5);
+    return `<tr>
+      <td class="num">${ui.esc(a.serial)}${a.serial_provisorio ? ' <span class="selo selo--nao_validado">prov.</span>' : ''}</td>
+      <td>${ui.esc(a.modelo ?? '—')}</td>
+      <td>${ui.fmtData(a.atualizado_em)} <span style="color:${dias > 15 ? 'var(--rubro-600)' : 'var(--ink-400)'}">(${dias}d)</span></td>
+      <td class="n">${ui.fmtMoeda(a.valor_aquisicao)}</td>
+      <td><button class="btn btn--peq" data-triar="${a.id}">Triar</button></td>
+    </tr>`;
+  }, 5, 'Nenhum equipamento aguardando triagem.');
+
+  $$('#tb-triagem [data-triar]').forEach((b) =>
+    b.addEventListener('click', () => abrirTriagem(lista.find((a) => a.id === b.dataset.triar), destinadores)));
+
+  /* --- em reparo --- */
+  const emReparo = lista.filter((a) => a.estado === 'reparo');
+  const { data: triagens } = await sb.from('triagens')
+    .select('ativo_id, custo_reparo_estimado, triado_em, destinador:destinador_id(razao_social, prazo_medio_dias)')
+    .eq('empresa_id', EMPRESA.id).eq('destino', 'reparo').order('triado_em', { ascending: false });
+  const ultimaTriagem = new Map();
+  for (const t of triagens ?? []) if (!ultimaTriagem.has(t.ativo_id)) ultimaTriagem.set(t.ativo_id, t);
+
+  ui.preencherTabela($('#tb-reparo'), emReparo, (a) => {
+    const t = ultimaTriagem.get(a.id);
+    const dias = t ? Math.floor((Date.now() - new Date(t.triado_em)) / 864e5) : null;
+    const prazo = t?.destinador?.prazo_medio_dias ?? 30;
+    const atrasado = dias != null && dias > prazo;
+    return `<tr>
+      <td class="num">${ui.esc(a.serial)}</td>
+      <td>${ui.esc(a.modelo ?? '—')}</td>
+      <td>${ui.esc(t?.destinador?.razao_social ?? '—')}</td>
+      <td>${ui.fmtData(t?.triado_em)}
+        ${dias != null ? `<span style="color:${atrasado ? 'var(--rubro-600)' : 'var(--ink-400)'}">(${dias}d de ${prazo})</span>` : ''}</td>
+      <td class="n">${ui.fmtMoeda(t?.custo_reparo_estimado)}</td>
+      <td>
+        <button class="btn btn--peq" data-reparo-ok="${a.id}">Recuperado</button>
+        <button class="btn btn--peq btn--risco" data-reparo-nok="${a.id}">Irrecuperável</button>
+      </td></tr>`;
+  }, 6, 'Nenhum equipamento em reparo.');
+
+  $$('#tb-reparo [data-reparo-ok]').forEach((b) =>
+    b.addEventListener('click', () => concluir(lista.find((a) => a.id === b.dataset.reparoOk), true)));
+  $$('#tb-reparo [data-reparo-nok]').forEach((b) =>
+    b.addEventListener('click', () => concluir(lista.find((a) => a.id === b.dataset.reparoNok), false)));
+
+  /* --- descarte aguardando lote --- */
+  const aguardando = await rev.aguardandoLote(EMPRESA.id);
+  ui.preencherTabela($('#tb-descarte'), aguardando, (a) => `
+    <tr><td class="num">${ui.esc(a.serial)}</td><td>${ui.esc(a.modelo ?? '—')}</td>
+      <td class="n">${ui.fmtMoeda(a.valor_aquisicao)}</td></tr>`,
+    3, 'Nenhum equipamento aguardando lote.');
+  $('#btn-formar-lote').disabled = aguardando.length === 0;
+  $('#btn-formar-lote').textContent = aguardando.length
+    ? `Formar lote (${aguardando.length} un.)` : 'Formar lote de reversa';
+
+  /* --- inventário completo --- */
+  const filtroEstado = $('#filtro-estado').value;
+  const busca = ($('#busca-ativo').value ?? '').toLowerCase();
+  const visiveis = lista
+    .filter((a) => !filtroEstado || a.estado === filtroEstado)
+    .filter((a) => !busca || `${a.serial} ${a.modelo ?? ''}`.toLowerCase().includes(busca))
+    .slice(0, 300);
 
   ui.preencherTabela($('#tb-ativos'), visiveis, (a) => `
     <tr>
-      <td class="num">${ui.esc(a.serial)}</td>
+      <td class="num">${ui.esc(a.serial)}${a.serial_provisorio
+        ? ` <button class="btn btn--peq btn--sec" data-serial="${a.id}" title="corrigir serial">prov.</button>` : ''}</td>
       <td>${ui.esc(a.modelo ?? '—')}</td>
-      <td><span class="selo selo--${a.estado === 'refurb' ? 'ativo' : 'neutro'}">${a.estado.replace('_', ' ')}</span></td>
+      <td><span class="selo selo--${a.estado === 'refurb' ? 'ativo' : a.estado === 'descarte' ? 'risco' : 'neutro'}">${ROTULO_ESTADO[a.estado]}</span></td>
       <td class="n">${a.ciclos_refurb}</td>
-      <td>${ESTADOS.filter((e) => e !== a.estado).map((e) =>
-        `<button class="btn btn--peq btn--sec" data-mover="${a.id}" data-estado="${e}">${e.replace('_', ' ')}</button>`
-      ).join(' ')}</td>
-    </tr>`, 5, 'Nenhum equipamento registrado.');
+      <td>${ui.fmtData(a.data_entrada)}</td>
+      <td>${proximaAcao(a)}</td>
+    </tr>`, 6, 'Inventário vazio — importe uma NF-e de compra.');
 
   $$('#tb-ativos [data-mover]').forEach((b) =>
     b.addEventListener('click', () => moverAtivo(b.dataset.mover, b.dataset.estado).catch(ui.erro)));
+  $$('#tb-ativos [data-triar2]').forEach((b) =>
+    b.addEventListener('click', () => abrirTriagem(lista.find((a) => a.id === b.dataset.triar2), destinadores)));
+  $$('#tb-ativos [data-serial]').forEach((b) =>
+    b.addEventListener('click', () => corrigirSerial(lista.find((a) => a.id === b.dataset.serial))));
+}
+
+/** A ação disponível depende do estado — evita transição sem sentido. */
+function proximaAcao(a) {
+  if (a.estado === 'novo' || a.estado === 'refurb')
+    return `<button class="btn btn--peq btn--sec" data-mover="${a.id}" data-estado="em_campo">enviar a campo</button>`;
+  if (a.estado === 'em_campo')
+    return `<button class="btn btn--peq btn--sec" data-mover="${a.id}" data-estado="retorno">registrar retorno</button>`;
+  if (a.estado === 'retorno')
+    return `<button class="btn btn--peq" data-triar2="${a.id}">triar</button>`;
+  if (a.estado === 'descarte')
+    return '<span style="color:var(--ink-400);font-size:12px">aguardando lote</span>';
+  if (a.estado === 'baixado')
+    return '<span style="color:var(--ink-400);font-size:12px">baixado</span>';
+  return '';
 }
 
 async function moverAtivo(id, novoEstado) {
   const { data: antes } = await sb.from('ativos_equipamento').select('*').eq('id', id).single();
-
-  const patch = { estado: novoEstado };
-  if (novoEstado === 'refurb') patch.ciclos_refurb = (antes.ciclos_refurb ?? 0) + 1;
-
-  const { error } = await sb.from('ativos_equipamento').update(patch).eq('id', id);
+  const { error } = await sb.from('ativos_equipamento').update({ estado: novoEstado }).eq('id', id);
   if (error) throw error;
-
   await sb.from('ativos_historico').insert({
     ativo_id: id, estado_de: antes.estado, estado_para: novoEstado,
   });
-
-  // Refurb evita a compra de CPE nova: vira lançamento ATIVO, amarrado
-  // ao mesmo documento de entrada do equipamento (§4.1 princípio 1).
-  if (novoEstado === 'refurb' && antes.documento_entrada_id) {
-    await lancar({
-      empresaId: EMPRESA.id,
-      documentoFonteId: antes.documento_entrada_id,
-      perfil: 'isp', categoria: 'refurb',
-      quantidadeOrigem: 1,
-      competencia: ui.competenciaAtual(),
-      observacao: `Refurb do serial ${antes.serial}.`,
-    });
-    ui.toast('Refurb registrado e lançamento ativo gerado.');
-  } else if (novoEstado === 'refurb') {
-    ui.toast('Refurb registrado. Sem documento de entrada, o lançamento de carbono não foi gerado (§4.1).', 'aviso', 9000);
-  } else {
-    ui.toast(`Equipamento movido para "${novoEstado.replace('_', ' ')}".`);
-  }
-
+  ui.toast(`Equipamento movido para "${ROTULO_ESTADO[novoEstado]}".`);
   renderComodato();
+}
+
+async function corrigirSerial(ativo) {
+  const novo = prompt(`Serial provisório: ${ativo.serial}\n\nInforme o serial real lido no equipamento:`);
+  if (!novo?.trim()) return;
+  const { error } = await sb.from('ativos_equipamento')
+    .update({ serial: novo.trim(), serial_provisorio: false }).eq('id', ativo.id);
+  if (error) return ui.erro(error);
+  ui.toast('Serial corrigido.');
+  renderComodato();
+}
+
+async function concluir(ativo, recuperado) {
+  try {
+    const r = await rev.concluirReparo({ empresaId: EMPRESA.id, ativo, recuperado });
+    ui.toast(recuperado
+      ? `Recuperado e devolvido ao estoque.${r.lancamento ? ' Lançamento ativo de carbono gerado.' : ''}`
+      : 'Marcado como irrecuperável — segue para descarte.');
+    renderComodato();
+  } catch (e) { ui.erro(e); }
+}
+
+/* ------------------------------------------------------ wizard de triagem */
+async function abrirTriagem(ativo, destinadores) {
+  if (!ativo) return;
+
+  const feito = await ui.wizard({
+    titulo: `Triagem — ${ativo.serial}`,
+    estadoInicial: { valorReposicao: ativo.valor_aquisicao ?? null },
+    etapas: [
+      {
+        titulo: 'Diagnóstico',
+        render: () => `
+          <p class="dica">Modelo: <strong>${ui.esc(ativo.modelo ?? '—')}</strong>
+             · entrada ${ui.fmtData(ativo.data_entrada)}
+             · ${ativo.ciclos_refurb} ciclo(s) de reaproveitamento.</p>
+          <label class="campo"><span>Motivo do retorno</span>
+            <select name="motivo">
+              ${Object.entries(rev.MOTIVOS).map(([k, v]) =>
+                `<option value="${k}">${ui.esc(v)}</option>`).join('')}
+            </select></label>
+          <div class="linha">
+            <label class="campo"><span>Custo estimado do reparo (R$)</span>
+              <input name="custo" type="number" step="0.01" min="0"></label>
+            <label class="campo"><span>Valor de reposição (R$)</span>
+              <input name="valor" type="number" step="0.01" min="0"
+                     value="${ativo.valor_aquisicao ?? ''}"></label>
+          </div>
+          <label class="campo"><span>Laudo técnico</span>
+            <textarea name="laudo" rows="3" placeholder="O que foi constatado na inspeção"></textarea></label>`,
+        aoSair: (el, est) => {
+          est.motivo = el.querySelector('[name=motivo]').value;
+          est.custoReparo = el.querySelector('[name=custo]').value || null;
+          est.valorReposicao = el.querySelector('[name=valor]').value || null;
+          est.laudo = el.querySelector('[name=laudo]').value || null;
+          est.sugestao = rev.sugerirDestino({
+            motivo: est.motivo, custoReparo: est.custoReparo, valorReposicao: est.valorReposicao,
+          });
+        },
+      },
+      {
+        titulo: 'Destino',
+        render: (est) => `
+          <div class="sugestao"><strong>Sugestão:</strong>
+            ${ui.esc(rev.DESTINOS[est.sugestao.destino].rotulo)} — ${ui.esc(est.sugestao.razao)}
+            <div style="margin-top:4px;font-size:11.5px">A decisão e o laudo são seus; a sugestão é só a conta.</div></div>
+          <div class="opcoes">
+            ${Object.entries(rev.DESTINOS).map(([k, v]) => `
+              <label class="opcao">
+                <input type="radio" name="destino" value="${k}"${k === est.sugestao.destino ? ' checked' : ''}>
+                <div><strong>${ui.esc(v.rotulo)}</strong>
+                  <span>${k === 'reparo' ? 'Vai para assistência técnica; volta ao estoque se recuperado.'
+                       : k === 'reposicao' ? 'Volta ao estoque agora — gera lançamento ativo de carbono.'
+                       : 'Entra em lote de reversa; o ativo de carbono nasce no CDF.'}</span></div>
+              </label>`).join('')}
+          </div>`,
+        aoSair: (el, est) => {
+          est.destino = el.querySelector('[name=destino]:checked')?.value;
+          if (!est.destino) { ui.toast('Escolha um destino.', 'aviso'); return false; }
+        },
+      },
+      {
+        titulo: 'Empresa de recebimento',
+        render: (est) => {
+          if (est.destino === 'reposicao') {
+            return `<div class="aviso aviso--info"><strong>Sem destinador</strong>
+              O equipamento volta ao seu estoque como reposição de campo. Nenhuma
+              empresa externa recebe.</div>`;
+          }
+          const tipo = est.destino === 'reparo' ? 'assistencia_tecnica' : 'reciclador';
+          const aptos = destinadores.filter((d) => d.tipo === tipo || d.tipo === 'fabricante' || d.tipo === 'refurbisher');
+          if (!aptos.length) {
+            return `<div class="aviso"><strong>Nenhum destinador cadastrado</strong>
+              Cadastre uma empresa de recebimento na tela <em>Destinadores</em>.
+              É possível concluir a triagem sem destinador, mas o lastro documental
+              fica incompleto.</div>`;
+          }
+          return `<label class="campo"><span>Empresa que vai receber</span>
+            <select name="destinador">
+              <option value="">— definir depois —</option>
+              ${aptos.map((d) => {
+                const lic = rev.situacaoLicenca(d);
+                return `<option value="${d.id}"${lic.bloqueia ? ' disabled' : ''}>
+                  ${ui.esc(d.razao_social)} — licença ${ui.esc(lic.rotulo)}${lic.bloqueia ? ' (bloqueado)' : ''}
+                </option>`;
+              }).join('')}
+            </select></label>
+            <p class="dica">Empresas com licença ambiental vencida aparecem bloqueadas:
+              destinação sem licença vigente não sustenta o dossiê.</p>`;
+        },
+        aoSair: (el, est) => {
+          est.destinadorId = el.querySelector('[name=destinador]')?.value || null;
+        },
+      },
+    ],
+    aoConcluir: async (est) => rev.registrarTriagem({
+      empresaId: EMPRESA.id, ativo,
+      destino: est.destino, motivo: est.motivo, laudo: est.laudo,
+      custoReparo: est.custoReparo, valorReposicao: est.valorReposicao,
+      destinadorId: est.destinadorId,
+    }),
+  });
+
+  if (!feito) return;
+  ui.toast(feito.aviso ?? `Triagem registrada — equipamento em "${ROTULO_ESTADO[feito.novoEstado]}".`,
+           feito.aviso ? 'aviso' : 'ok', feito.aviso ? 9000 : 5000);
+  renderComodato();
+}
+
+/* --------------------------------------------------- wizard de formação de lote */
+async function abrirFormarLote() {
+  const [aguardando, destinadores, { data: vinculos }] = await Promise.all([
+    rev.aguardandoLote(EMPRESA.id),
+    rev.listarDestinadores(EMPRESA.id, { tipo: 'reciclador' }),
+    sb.from('vinculos_comerciais')
+      .select('distribuidor_id, rateio_isp_pct, dist:distribuidor_id(razao_social)')
+      .eq('isp_id', EMPRESA.id).eq('consentido', true),
+  ]);
+
+  if (!aguardando.length) return ui.toast('Nenhum equipamento em descarte.', 'aviso');
+
+  const lote = await ui.wizard({
+    titulo: 'Formar lote de logística reversa',
+    etapas: [
+      {
+        titulo: 'Conteúdo',
+        render: () => `
+          <p class="dica">${aguardando.length} equipamento(s) em descarte sem lote.
+            Todos entram neste lote.</p>
+          <div class="tabela-wrap" style="max-height:200px;overflow:auto">
+            <table class="tabela"><thead><tr><th>Serial</th><th>Modelo</th></tr></thead>
+            <tbody>${aguardando.slice(0, 100).map((a) =>
+              `<tr><td class="num">${ui.esc(a.serial)}</td><td>${ui.esc(a.modelo ?? '—')}</td></tr>`).join('')}
+            </tbody></table>
+          </div>
+          <div class="linha" style="margin-top:14px">
+            <label class="campo"><span>Identificação do lote</span>
+              <input name="ident" placeholder="deixe vazio para gerar automaticamente"></label>
+            <label class="campo" style="flex:0 1 190px"><span>Peso médio por unidade (kg)</span>
+              <input name="peso" type="number" step="0.01" min="0.01" value="0.35"></label>
+          </div>
+          <p class="dica">0,35 kg ≈ ONU/roteador. Substitua pela pesagem real quando
+            houver — o peso é a base do ativo de carbono da reversa.</p>`,
+        aoSair: (el, est) => {
+          est.identificacao = el.querySelector('[name=ident]').value || null;
+          est.pesoMedio = Number(el.querySelector('[name=peso]').value || 0.35);
+          if (!(est.pesoMedio > 0)) { ui.toast('Peso médio inválido.', 'aviso'); return false; }
+        },
+      },
+      {
+        titulo: 'Destinador',
+        render: () => destinadores.length
+          ? `<label class="campo"><span>Reciclador / destinador final</span>
+              <select name="destinador">
+                <option value="">— definir depois —</option>
+                ${destinadores.map((d) => {
+                  const lic = rev.situacaoLicenca(d);
+                  return `<option value="${d.id}"${lic.bloqueia ? ' disabled' : ''}>
+                    ${ui.esc(d.razao_social)} — licença ${ui.esc(lic.rotulo)}</option>`;
+                }).join('')}
+              </select></label>
+             <p class="dica">O banco recusa o lote se a licença estiver vencida — a
+               validação não é só da tela.</p>`
+          : `<div class="aviso"><strong>Nenhum reciclador cadastrado</strong>
+              O lote pode ser criado sem destinador e completado depois, mas só chega
+              a "destinado" com o CDF anexado.</div>`,
+        aoSair: (el, est) => { est.destinadorId = el.querySelector('[name=destinador]')?.value || null; },
+      },
+      {
+        titulo: 'Rateio §8',
+        render: () => (vinculos ?? []).length
+          ? `<p class="dica">O ativo de carbono do lote é rateado com o distribuidor
+               parceiro conforme o vínculo consentido.</p>
+             <label class="campo"><span>Distribuidor parceiro</span>
+               <select name="parceiro">
+                 <option value="">— sem rateio (100% do ISP) —</option>
+                 ${vinculos.map((v) => `<option value="${v.distribuidor_id}">
+                   ${ui.esc(v.dist?.razao_social ?? '')} — ISP fica com ${ui.fmtNum(v.rateio_isp_pct, 0)}%
+                 </option>`).join('')}
+               </select></label>`
+          : `<div class="aviso aviso--info"><strong>Sem vínculo consentido</strong>
+              O ativo de carbono deste lote fica integralmente com o ISP. Para ratear
+              com o distribuidor, crie o vínculo no painel e consinta o acesso.</div>`,
+        aoSair: (el, est) => { est.parceiroId = el.querySelector('[name=parceiro]')?.value || null; },
+      },
+    ],
+    aoConcluir: async (est) => rev.formarLote({
+      empresaId: EMPRESA.id, destinadorId: est.destinadorId,
+      ispParceiroId: est.parceiroId, pesoMedioKg: est.pesoMedio,
+      identificacao: est.identificacao,
+    }),
+  });
+
+  if (!lote) return;
+  ui.toast(`Lote formado com ${aguardando.length} equipamento(s). Anexe o MTR para avançar.`, 'ok', 8000);
+  renderComodato();
+}
+
+/* ========================================================= destinadores */
+async function renderDestinadores() {
+  const lista = await rev.listarDestinadores(EMPRESA.id, { apenasAtivos: false });
+
+  ui.preencherTabela($('#tb-destinadores'), lista, (d) => {
+    const lic = rev.situacaoLicenca(d);
+    return `<tr${d.ativo ? '' : ' style="opacity:.5"'}>
+      <td><strong>${ui.esc(d.razao_social)}</strong>
+        ${d.contato_email ? `<div style="font-size:11.5px;color:var(--ink-500)">${ui.esc(d.contato_email)}</div>` : ''}</td>
+      <td class="num">${ui.esc(d.cnpj)}</td>
+      <td>${ui.esc(rev.TIPOS_DESTINADOR[d.tipo] ?? d.tipo)}</td>
+      <td>${ui.esc(d.uf ?? '—')}</td>
+      <td><span class="selo selo--${lic.nivel}">${ui.esc(lic.rotulo)}</span>
+        ${d.licenca_ambiental ? `<div style="font-size:11px;color:var(--ink-400)">${ui.esc(d.licenca_ambiental)}</div>` : ''}</td>
+      <td style="font-size:11.5px">${(d.aceita_categorias ?? []).map((c) => c.replace(/_/g, ' ')).join(', ') || '—'}</td>
+      <td><button class="btn btn--peq btn--sec" data-edit-dest="${d.id}">editar</button></td>
+    </tr>`;
+  }, 7, 'Cadastre a primeira empresa de recebimento.');
+
+  $$('#tb-destinadores [data-edit-dest]').forEach((b) =>
+    b.addEventListener('click', () => abrirDestinador(lista.find((d) => d.id === b.dataset.editDest))));
+}
+
+async function abrirDestinador(existente = null) {
+  const salvo = await ui.wizard({
+    titulo: existente ? `Destinador — ${existente.razao_social}` : 'Cadastrar destinador',
+    estadoInicial: existente ? { ...existente } : {},
+    etapas: [
+      {
+        titulo: 'Identificação',
+        render: (est) => `
+          <div class="linha">
+            <label class="campo"><span>CNPJ</span>
+              <input name="cnpj" value="${ui.esc(est.cnpj ?? '')}" required inputmode="numeric"></label>
+            <button class="btn btn--sec" type="button" name="buscar">Consultar</button>
+          </div>
+          <label class="campo" style="margin-top:12px"><span>Razão social</span>
+            <input name="razao_social" value="${ui.esc(est.razao_social ?? '')}" required></label>
+          <div class="linha">
+            <label class="campo"><span>Tipo</span>
+              <select name="tipo">
+                ${Object.entries(rev.TIPOS_DESTINADOR).map(([k, v]) =>
+                  `<option value="${k}"${est.tipo === k ? ' selected' : ''}>${ui.esc(v)}</option>`).join('')}
+              </select></label>
+            <label class="campo" style="flex:0 1 90px"><span>UF</span>
+              <input name="uf" maxlength="2" value="${ui.esc(est.uf ?? '')}" style="text-transform:uppercase"></label>
+            <label class="campo"><span>Município</span>
+              <input name="municipio" value="${ui.esc(est.municipio ?? '')}"></label>
+          </div>`,
+        aoEntrar: (el, est) => {
+          el.querySelector('[name=buscar]').addEventListener('click', async (ev) => {
+            const btn = ev.target;
+            btn.disabled = true; btn.textContent = 'Consultando…';
+            const d = await consultaCnpj(el.querySelector('[name=cnpj]').value);
+            btn.disabled = false; btn.textContent = 'Consultar';
+            if (!d) return ui.toast('BrasilAPI indisponível — preencha manualmente.', 'aviso', 7000);
+            el.querySelector('[name=razao_social]').value = d.razao_social ?? '';
+            el.querySelector('[name=uf]').value = d.uf ?? '';
+            el.querySelector('[name=municipio]').value = d.municipio ?? '';
+            ui.toast('Dados preenchidos pela BrasilAPI.');
+          });
+        },
+        aoSair: (el, est) => {
+          const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
+          if (!v('cnpj') || !v('razao_social')) { ui.toast('CNPJ e razão social são obrigatórios.', 'aviso'); return false; }
+          Object.assign(est, {
+            cnpj: v('cnpj'), razao_social: v('razao_social'), tipo: v('tipo'),
+            uf: v('uf').toUpperCase() || null, municipio: v('municipio') || null,
+          });
+        },
+      },
+      {
+        titulo: 'Licença ambiental',
+        render: (est) => `
+          <p class="dica">É a licença que transforma descarte em destinação regular.
+            Sem validade preenchida, o cadastro fica marcado como não validado e
+            o alerta de vencimento não funciona.</p>
+          <div class="linha">
+            <label class="campo"><span>Número da licença</span>
+              <input name="licenca_ambiental" value="${ui.esc(est.licenca_ambiental ?? '')}"></label>
+            <label class="campo"><span>Órgão emissor</span>
+              <input name="licenca_orgao" value="${ui.esc(est.licenca_orgao ?? '')}" placeholder="IMA, CETESB, IBAMA…"></label>
+          </div>
+          <div class="linha" style="margin-top:12px">
+            <label class="campo"><span>Validade</span>
+              <input name="licenca_validade" type="date" value="${est.licenca_validade ?? ''}"></label>
+            <label class="campo"><span>CADRI (quando aplicável)</span>
+              <input name="cadri" value="${ui.esc(est.cadri ?? '')}"></label>
+            <label class="campo" style="flex:0 1 170px"><span>Prazo médio (dias)</span>
+              <input name="prazo_medio_dias" type="number" min="1" value="${est.prazo_medio_dias ?? ''}"></label>
+          </div>`,
+        aoSair: (el, est) => {
+          const v = (n) => el.querySelector(`[name=${n}]`).value.trim();
+          Object.assign(est, {
+            licenca_ambiental: v('licenca_ambiental') || null,
+            licenca_orgao: v('licenca_orgao') || null,
+            licenca_validade: v('licenca_validade') || null,
+            cadri: v('cadri') || null,
+            prazo_medio_dias: v('prazo_medio_dias') ? Number(v('prazo_medio_dias')) : null,
+          });
+        },
+      },
+      {
+        titulo: 'Escopo e contato',
+        render: (est) => `
+          <label class="campo"><span>Categorias que aceita</span></label>
+          <div class="opcoes" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+            ${rev.CATEGORIAS_ACEITAS.map((c) => `
+              <label class="opcao"><input type="checkbox" name="cat" value="${c}"
+                ${(est.aceita_categorias ?? []).includes(c) ? 'checked' : ''}>
+                <div><strong>${c.replace(/_/g, ' ')}</strong></div></label>`).join('')}
+          </div>
+          <div class="linha" style="margin-top:14px">
+            <label class="campo"><span>Contato</span>
+              <input name="contato_nome" value="${ui.esc(est.contato_nome ?? '')}"></label>
+            <label class="campo"><span>E-mail</span>
+              <input name="contato_email" type="email" value="${ui.esc(est.contato_email ?? '')}"></label>
+            <label class="campo"><span>Telefone</span>
+              <input name="contato_telefone" value="${ui.esc(est.contato_telefone ?? '')}"></label>
+          </div>
+          <label class="opcao" style="margin-top:12px">
+            <input type="checkbox" name="ativo" ${est.ativo === false ? '' : 'checked'}>
+            <div><strong>Destinador ativo</strong><span>Desmarque para aposentar sem apagar o histórico.</span></div>
+          </label>`,
+        aoSair: (el, est) => {
+          Object.assign(est, {
+            aceita_categorias: [...el.querySelectorAll('[name=cat]:checked')].map((c) => c.value),
+            contato_nome: el.querySelector('[name=contato_nome]').value.trim() || null,
+            contato_email: el.querySelector('[name=contato_email]').value.trim() || null,
+            contato_telefone: el.querySelector('[name=contato_telefone]').value.trim() || null,
+            ativo: el.querySelector('[name=ativo]').checked,
+          });
+        },
+      },
+    ],
+    aoConcluir: async (est) => rev.salvarDestinador({
+      empresaId: EMPRESA.id, id: existente?.id ?? null,
+      cnpj: est.cnpj, razao_social: est.razao_social, tipo: est.tipo,
+      uf: est.uf, municipio: est.municipio,
+      licenca_ambiental: est.licenca_ambiental, licenca_orgao: est.licenca_orgao,
+      licenca_validade: est.licenca_validade, cadri: est.cadri,
+      prazo_medio_dias: est.prazo_medio_dias, aceita_categorias: est.aceita_categorias,
+      contato_nome: est.contato_nome, contato_email: est.contato_email,
+      contato_telefone: est.contato_telefone, ativo: est.ativo,
+      validacao: est.licenca_validade ? 'em_validacao' : 'nao_validado',
+    }),
+  });
+
+  if (!salvo) return;
+  ui.toast('Destinador salvo.');
+  renderDestinadores();
 }
 
 /* ========================================================== incentivos */
@@ -631,13 +1089,13 @@ function ligarFormularios() {
     renderFrota();
   });
 
-  /* --- ativo em comodato --- */
+  /* --- ativo em comodato (registro manual) --- */
   $('#form-ativo').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = ui.lerForm(ev.target);
     const { error } = await sb.from('ativos_equipamento').insert({
       serial: f.serial, modelo: f.modelo, fabricante: f.fabricante,
-      ncm: f.ncm, isp_id: EMPRESA.id, estado: 'novo',
+      ncm: f.ncm, isp_id: EMPRESA.id, estado: 'novo', data_entrada: ui.hoje(),
     });
     if (error) return ui.erro(error);
     ui.toast('Equipamento registrado.');
@@ -645,6 +1103,63 @@ function ligarFormularios() {
   });
 
   $('#busca-ativo').addEventListener('input', () => renderComodato().catch(ui.erro));
+  $('#filtro-estado').addEventListener('change', () => renderComodato().catch(ui.erro));
+  $('#btn-formar-lote').addEventListener('click', () => abrirFormarLote().catch(ui.erro));
+  $('#btn-novo-destinador').addEventListener('click', () => abrirDestinador().catch(ui.erro));
+
+  /* --- NF-e de compra → inventário de rede --- */
+  $('#form-nfe-equip').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const arquivos = [...ev.target.arquivos.files];
+    const rel = $('#relatorio-equip');
+    rel.innerHTML = `<p class="dica">Processando ${arquivos.length} arquivo(s)…</p>`;
+
+    const resultados = await lerLote(arquivos, lerNFe);
+    const linhas = [];
+
+    for (const r of resultados) {
+      if (!r.ok) { linhas.push({ nome: r.arquivo.name, situacao: 'erro', detalhe: r.erro }); continue; }
+      try {
+        const d = r.dados;
+        const { doc, reaproveitado } = await registrarDocumento({
+          empresaId: EMPRESA.id, tipo: 'nfe', arquivo: r.arquivo,
+          payload: d, chaveAcesso: d.chave_acesso, inconsistencias: d.inconsistencias,
+        });
+
+        const inv = await rev.inventariarNFe({
+          empresaId: EMPRESA.id, documento: doc, dadosNFe: d,
+        });
+
+        if (inv.semEquipamento) {
+          linhas.push({ nome: r.arquivo.name, situacao: 'sem_equipamento',
+            detalhe: 'NF-e gravada como documento-fonte, mas sem item de equipamento de rede.' });
+        } else if (inv.criados === 0) {
+          linhas.push({ nome: r.arquivo.name, situacao: 'duplicado',
+            detalhe: `${inv.jaExistiam} equipamento(s) já estavam no inventário.` });
+        } else {
+          linhas.push({ nome: r.arquivo.name, situacao: 'ok',
+            detalhe: `${inv.criados} equipamento(s) criados`
+              + (inv.provisorios ? `, ${inv.provisorios} com serial provisório` : '')
+              + (inv.jaExistiam ? `, ${inv.jaExistiam} já existiam` : '')
+              + (inv.truncado ? ' — item truncado em 500 un.' : '')
+              + (reaproveitado ? ' (NF-e já registrada antes)' : '') });
+        }
+      } catch (e) {
+        linhas.push({ nome: r.arquivo.name, situacao: 'erro', detalhe: e.message });
+      }
+    }
+
+    const cor = { ok: 'validado', duplicado: 'neutro', sem_equipamento: 'nao_validado', erro: 'risco' };
+    rel.innerHTML = `<div class="tabela-wrap"><table class="tabela">
+      <thead><tr><th>Arquivo</th><th>Situação</th><th>Detalhe</th></tr></thead>
+      <tbody>${linhas.map((l) => `<tr>
+        <td class="num" style="font-size:12px">${ui.esc(l.nome)}</td>
+        <td><span class="selo selo--${cor[l.situacao]}">${l.situacao.replace(/_/g, ' ')}</span></td>
+        <td style="font-size:12px">${ui.esc(l.detalhe)}</td></tr>`).join('')}</tbody>
+    </table></div>`;
+
+    renderComodato();
+  });
 
   /* --- P&D --- */
   $('#form-pd').addEventListener('submit', async (ev) => {
@@ -713,6 +1228,7 @@ function ligarFormularios() {
 
 const CARREGADORES = {
   dashboard: renderDashboard, energia: renderEnergia, frota: renderFrota,
-  comodato: renderComodato, incentivos: renderIncentivos, simulador: renderSimulador,
+  comodato: renderComodato, destinadores: renderDestinadores,
+  incentivos: renderIncentivos, simulador: renderSimulador,
   pd: renderPd, mrv: renderMrv, selo: renderSelo,
 };

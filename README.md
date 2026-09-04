@@ -141,7 +141,7 @@ Settings → Pages → Source: **GitHub Actions**. O push na `main` dispara
 
 ```
 index.html              Login, cadastro multiempresa, vínculos §8, auditoria, catálogo
-isp.html                Módulo 1 — 9 telas (§6.5 + P&D + MRV)
+isp.html                Módulo 1 — 10 telas (§6.5 + P&D + MRV + destinadores)
 dist.html               Módulo 2 — 8 telas (§7.5 + incentivos)
 
 assets/css/app.css      Design system único
@@ -153,11 +153,12 @@ assets/js/
   xml.js                Parsers NF-e e CT-e (DOMParser, com inconsistências)
   carbono.js            Motor de partidas dobradas + PERFIS_SETORIAIS
   fiscal.js             Funil de qualificação, simulador de regime, curva da reforma
+  reversa.js            NF-e → inventário, triagem, destinadores, formação de lote
   app-index.js          Lógica do painel
   app-isp.js            Lógica do Módulo 1
   app-dist.js           Lógica do Módulo 2
 
-supabase/migrations/    7 migrações — schema §9 + RLS + Storage
+supabase/migrations/    14 migrações — schema §9 + RLS + Storage + alertas + reversa
 supabase/seed/          Catálogo de incentivos, fatores, curva da reforma
 supabase/tests/         Stub do ambiente Supabase + 10 testes de RLS
 tests/                  Testes dos parsers (18 asserções) + fixtures
@@ -182,6 +183,12 @@ tela — a interface não é a última linha de defesa.
 | Nenhum incentivo vira `ativo` sem parceiro licenciado (§12.4) | gatilho `fn_valida_funil` | T8 |
 | Trilha de auditoria completa (RNF-005) | gatilho `fn_auditoria` (append-only) | T9 |
 | Lote só é `destinado` com CDF anexado | `check` constraint `lote_destinado_exige_cdf` | — |
+| Lote não se forma com licença ambiental vencida | `formar_lote_reversa()` | T13 |
+| Lote não se forma vazio | `formar_lote_reversa()` | T15 |
+| Triagem é laudo — não se reescreve | sem `GRANT UPDATE` em `triagens` | T16 |
+| Destinadores e triagens isolados por empresa | RLS `pode_ver`/`pode_editar` | T18 |
+| Empresa pode ser removida por inteiro (RNF-007/LGPD) | ações de exclusão nas FKs + cascata no gatilho | T19 |
+| Exclusão avulsa de prova segue bloqueada | `fn_bloqueia_alteracao` | T20 |
 | Lançamento sem documento-fonte é recusado (§4.1) | `NOT NULL` na FK + guarda no motor | — |
 
 Rodar os testes localmente:
@@ -224,7 +231,25 @@ Isto é a §17 da spec, com o estado real do código.
 - **Catálogo de incentivos**: os 11 itens do §3 entram `nao_validado`. Nenhuma
   economia é prometida antes da etapa `validacao_parceiro`.
 
-### 6.2 Funcionalidades que ficaram para as próximas fases
+### 6.2 Automação do ciclo de reversa (F3 — entregue)
+
+O ciclo do §8 roda sem digitação manual:
+
+- **NF-e de compra → inventário**: itens com NCM 8517/8471/8544/8525 viram ativos.
+  Séries são extraídas do campo de informações adicionais quando existem; o que
+  falta entra como **serial provisório** (derivado da chave + item, estável, de
+  forma que reimportar a mesma nota não duplica) para o técnico corrigir em campo.
+- **Triagem do retorno** em wizard de 3 passos: diagnóstico → destino → destinador.
+  A sugestão de destino compara custo de reparo × valor de reposição, mas quem
+  decide e assina o laudo é o técnico. Reposição gera lançamento ativo de carbono;
+  descarte espera o CDF do lote.
+- **Destinadores** com licença ambiental e validade. Destinar para licença vencida
+  é recusado pelo banco, não só pela tela, e o alerta dispara 60 dias antes.
+- **Formação de lote** a partir dos descartes, com rateio §8 quando há vínculo consentido.
+- **Cinco alertas novos**: retorno sem triagem, reparo fora do prazo, licença
+  vencendo, massa em descarte sem lote, lote parado.
+
+### 6.3 Funcionalidades que ficaram para as próximas fases
 
 - **Dossiê em PDF nativo** (F4): hoje sai JSON assinável + versão imprimível.
 - **OCR de fatura de energia**: a importação é **assistida** — a fatura é
@@ -241,13 +266,16 @@ Isto é a §17 da spec, com o estado real do código.
   navegador; baixe-a, exporte como CSV e rode
   `python3 tools/carregar_ex_tarifario.py vigentes.csv` — a carga é
   idempotente e filtra os prefixos de NCM do setor.
+- **Peso do lote de reversa** é estimado (default 0,35 kg/unidade ≈ ONU/roteador).
+  O peso é a base do ativo de carbono da reversa — substituir por pesagem real
+  do destinador assim que houver balança no fluxo.
 - **`lucro_no_exercicio`**: não é inferível dos documentos importados. O funil
   trata como *pendente de confirmação*, não como reprovação.
 - **Importação de 1.000 CT-e em ≤ 60 s (RNF-004)**: o loop atual é sequencial e
   reporta o tempo na tela. Se o alvo não for atingido no volume real, a saída é
   paralelizar em lotes ou mover a importação para Edge Function.
 
-### 6.3 Antes de qualquer piloto
+### 6.4 Antes de qualquer piloto
 
 - [ ] Validação jurídica das teses fiscais (marcar `status_validacao`)
 - [ ] Confirmar convênios CONFAZ e adesões estaduais por UF

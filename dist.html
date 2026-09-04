@@ -223,9 +223,11 @@
                 <input name="peso_kg" type="number" step="0.01" min="0.01" required></label>
               <label class="campo"><span>Qtd. equipamentos</span><input name="qtd_equipamentos" type="number" min="0"></label>
             </div>
+            <label class="campo" style="margin-top:12px"><span>Destinador cadastrado</span>
+              <select name="destinador_id" id="sel-destinador"></select></label>
             <div class="linha" style="margin-top:12px">
-              <label class="campo"><span>Destinador (CNPJ)</span><input name="destinador_cnpj" inputmode="numeric"></label>
-              <label class="campo"><span>Destinador (nome)</span><input name="destinador_nome"></label>
+              <label class="campo"><span>Ou CNPJ do destinador</span><input name="destinador_cnpj" inputmode="numeric"></label>
+              <label class="campo"><span>Nome do destinador</span><input name="destinador_nome"></label>
               <label class="campo"><span>ISP parceiro</span>
                 <select name="isp_parceiro_id" id="sel-isp"><option value="">— sem rateio —</option></select></label>
               <button class="btn" type="submit">Criar lote</button>

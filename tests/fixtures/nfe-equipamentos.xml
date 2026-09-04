@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+<NFe><infNFe Id="NFe42260198765432000188550010000099991000099998" versao="4.00">
+<ide><cUF>42</cUF><nNF>9999</nNF><serie>1</serie><dhEmi>2026-03-10T14:00:00-03:00</dhEmi><natOp>VENDA DE EQUIPAMENTO</natOp></ide>
+<emit><CNPJ>98765432000188</CNPJ><xNome>DIST GAMA TELECOM SA</xNome><enderEmit><UF>SC</UF></enderEmit></emit>
+<dest><CNPJ>11222333000181</CNPJ><xNome>ISP ALFA LTDA</xNome></dest>
+<det nItem="1"><prod><cProd>ONU-100</cProd><xProd>ONU GPON 1GE WIFI AC1200</xProd><NCM>85176259</NCM><qCom>50.0000</qCom><uCom>UN</uCom><vProd>7500.00</vProd></prod>
+  <infAdProd>Seriais: ALFA0000000001, ALFA0000000002, ALFA0000000003</infAdProd></det>
+<det nItem="2"><prod><cProd>OLT-8</cProd><xProd>OLT GPON 8 PORTAS CHASSI</xProd><NCM>85176249</NCM><qCom>2.0000</qCom><uCom>UN</uCom><vProd>24000.00</vProd></prod>
+  <infAdProd>N/S: OLTX12345678 OLTX87654321</infAdProd></det>
+<det nItem="3"><prod><cProd>FIB-DROP</cProd><xProd>CABO DROP OPTICO 1FO</xProd><NCM>85447010</NCM><qCom>2000.0000</qCom><uCom>M</uCom><vProd>3000.00</vProd></prod></det>
+<det nItem="4"><prod><cProd>PARAF</cProd><xProd>PARAFUSO INOX M6</xProd><NCM>73181500</NCM><qCom>500.0000</qCom><uCom>UN</uCom><vProd>250.00</vProd></prod></det>
+<total><ICMSTot><vNF>34750.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>

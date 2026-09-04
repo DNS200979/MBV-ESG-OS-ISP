@@ -7,6 +7,7 @@ import { registrarDocumento, listarDocumentos } from './docfonte.js';
 import { lancar, lancarRateioReversa, balanco, lancamentos, categoriasDoPerfil } from './carbono.js';
 import { funilDaEmpresa, salvarFunil, curvaReforma, exposicaoReforma } from './fiscal.js';
 import { lerCTe, lerLote } from './xml.js';
+import { situacaoLicenca, listarDestinadores } from './reversa.js';
 import * as ui from './ui.js';
 
 const $  = (s, r = document) => r.querySelector(s);
@@ -242,6 +243,18 @@ async function renderReversa() {
   $('#sel-isp').innerHTML = '<option value="">— sem rateio —</option>' +
     vinculos.map((v) => `<option value="${v.isp_id}" data-rateio="${v.rateio_isp_pct}">
       ${ui.esc(v.isp?.razao_social ?? v.isp_id)} (${ui.fmtNum(v.rateio_isp_pct, 0)}%)</option>`).join('');
+
+  // Destinadores cadastrados substituem a digitação livre de CNPJ
+  const destinadores = await listarDestinadores(EMPRESA.id, { tipo: 'reciclador' });
+  const selDest = $('#sel-destinador');
+  if (selDest) {
+    selDest.innerHTML = '<option value="">— informar manualmente —</option>' +
+      destinadores.map((d) => {
+        const lic = situacaoLicenca(d);
+        return `<option value="${d.id}" data-cnpj="${d.cnpj}" data-nome="${ui.esc(d.razao_social)}"
+          ${lic.bloqueia ? 'disabled' : ''}>${ui.esc(d.razao_social)} — licença ${ui.esc(lic.rotulo)}</option>`;
+      }).join('');
+  }
 
   const { data: lotes, error } = await sb.from('lotes_reversa')
     .select('*, isp:isp_parceiro_id(razao_social)')
@@ -663,14 +676,17 @@ function ligarFormularios() {
     const form = ev.target;
     const f = ui.lerForm(form);
     const opt = form.isp_parceiro_id.selectedOptions[0];
+    const optDest = form.destinador_id?.selectedOptions[0];
 
     const { error } = await sb.from('lotes_reversa').insert({
       empresa_id: EMPRESA.id,
       identificacao: f.identificacao,
       peso_kg: Number(f.peso_kg),
       qtd_equipamentos: f.qtd_equipamentos,
-      destinador_cnpj: f.destinador_cnpj ? normalizaCnpj(f.destinador_cnpj) : null,
-      destinador_nome: f.destinador_nome,
+      destinador_id: f.destinador_id || null,
+      destinador_cnpj: f.destinador_cnpj ? normalizaCnpj(f.destinador_cnpj)
+                       : (optDest?.dataset.cnpj ?? null),
+      destinador_nome: f.destinador_nome ?? optDest?.dataset.nome ?? null,
       isp_parceiro_id: f.isp_parceiro_id,
       rateio_isp_pct: f.isp_parceiro_id ? Number(opt?.dataset.rateio ?? 50) : 0,
       status: 'coleta', coletado_em: ui.hoje(),

@@ -17,7 +17,8 @@
       <button data-tela="dashboard">Dashboard</button>
       <button data-tela="energia">Energia &amp; POPs</button>
       <button data-tela="frota">Frota</button>
-      <button data-tela="comodato">Comodato</button>
+      <button data-tela="comodato">Comodato &amp; inventário</button>
+      <button data-tela="destinadores">Destinadores</button>
       <div class="grupo">Fiscal</div>
       <button data-tela="incentivos">Incentivos</button>
       <button data-tela="simulador">Simulador de regime</button>
@@ -166,26 +167,31 @@
 
     <!-- ----------------------------------------------------- comodato -->
     <section id="tela-comodato" class="pagina aba-oculta">
-      <p class="dica">RF-ISP-004 — ciclo de vida por serial:
-        <code>novo → em campo → retorno → refurb → descarte</code>.
-        Refurb gera lançamento ATIVO (carbono incorporado evitado); descarte sem
-        CDF gera passivo.</p>
+      <p class="dica">RF-ISP-004 — o inventário nasce da NF-e de compra, não de digitação.
+        Ciclo: <code>novo → em campo → retorno → triagem → reparo | reposição | descarte → baixado</code>.
+        Cada mudança de estado fica no histórico, e o carbono só é lançado onde há
+        documento-fonte que sustente.</p>
+
+      <section><dl class="grade grade--4" id="kpis-inventario"></dl></section>
 
       <div class="grade grade--2">
         <section class="cartao">
-          <header><h2>Registrar equipamento</h2></header>
+          <header><h2>Importar NF-e de compra</h2>
+            <span class="selo selo--neutro">gera inventário</span></header>
           <div class="cartao__corpo">
-            <form id="form-ativo">
+            <form id="form-nfe-equip">
               <div class="linha">
-                <label class="campo"><span>Serial</span><input name="serial" required></label>
-                <label class="campo"><span>Modelo</span><input name="modelo"></label>
+                <label class="campo"><span>XML(s) da NF-e de equipamento</span>
+                  <input name="arquivos" type="file" accept=".xml" multiple required></label>
+                <button class="btn" type="submit">Importar</button>
               </div>
-              <div class="linha" style="margin-top:12px">
-                <label class="campo"><span>Fabricante</span><input name="fabricante"></label>
-                <label class="campo"><span>NCM</span><input name="ncm" maxlength="8" inputmode="numeric"></label>
-                <button class="btn" type="submit">Adicionar</button>
-              </div>
+              <p class="dica" style="margin:10px 0 0">
+                Itens com NCM 8517/8471/8544/8525 viram ativos. Séries são extraídas do
+                campo de informações adicionais quando existirem; o que faltar entra como
+                <strong>serial provisório</strong> para o técnico corrigir em campo.
+              </p>
             </form>
+            <div id="relatorio-equip" style="margin-top:14px"></div>
           </div>
         </section>
 
@@ -196,11 +202,83 @@
       </div>
 
       <section class="cartao">
-        <header><h2>Equipamentos</h2>
-          <input id="busca-ativo" placeholder="filtrar por serial ou modelo" style="max-width:260px"></header>
+        <header><h2>Fila de triagem</h2>
+          <span class="selo selo--nao_validado" id="selo-triagem"></span></header>
         <div class="tabela-wrap"><table class="tabela">
-          <thead><tr><th>Serial</th><th>Modelo</th><th>Estado</th><th class="n">Refurbs</th><th>Mover para</th></tr></thead>
+          <thead><tr><th>Serial</th><th>Modelo</th><th>Em retorno desde</th>
+            <th class="n">Valor aquis.</th><th></th></tr></thead>
+          <tbody id="tb-triagem"></tbody>
+        </table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Em reparo</h2></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Serial</th><th>Modelo</th><th>Assistência</th>
+            <th>Enviado em</th><th class="n">Custo est.</th><th></th></tr></thead>
+          <tbody id="tb-reparo"></tbody>
+        </table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Descarte aguardando lote</h2>
+          <button class="btn btn--peq" id="btn-formar-lote">Formar lote de reversa</button></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Serial</th><th>Modelo</th><th class="n">Valor aquis.</th></tr></thead>
+          <tbody id="tb-descarte"></tbody>
+        </table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Inventário completo</h2>
+          <div class="linha" style="margin:0">
+            <select id="filtro-estado" style="width:auto">
+              <option value="">todos os estados</option>
+              <option value="novo">novo</option><option value="em_campo">em campo</option>
+              <option value="retorno">retorno</option><option value="reparo">reparo</option>
+              <option value="refurb">refurb</option><option value="descarte">descarte</option>
+              <option value="baixado">baixado</option>
+            </select>
+            <input id="busca-ativo" placeholder="serial ou modelo" style="max-width:220px">
+          </div></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Serial</th><th>Modelo</th><th>Estado</th><th class="n">Ciclos</th>
+            <th>Entrada</th><th>Ação</th></tr></thead>
           <tbody id="tb-ativos"></tbody>
+        </table></div>
+      </section>
+
+      <section class="cartao">
+        <header><h2>Registro manual</h2></header>
+        <div class="cartao__corpo">
+          <form id="form-ativo" class="linha">
+            <label class="campo"><span>Serial</span><input name="serial" required></label>
+            <label class="campo"><span>Modelo</span><input name="modelo"></label>
+            <label class="campo"><span>Fabricante</span><input name="fabricante"></label>
+            <label class="campo" style="flex:0 1 130px"><span>NCM</span>
+              <input name="ncm" maxlength="8" inputmode="numeric"></label>
+            <button class="btn" type="submit">Adicionar</button>
+          </form>
+        </div>
+      </section>
+    </section>
+
+    <!-- -------------------------------------------------- destinadores -->
+    <section id="tela-destinadores" class="pagina aba-oculta">
+      <div class="aviso">
+        <strong>Licença vigente é o que sustenta a destinação</strong>
+        Destinar equipamento para empresa com licença ambiental vencida não cumpre a
+        PNRS nem sustenta dossiê — o banco recusa formar lote nessa condição, e o
+        alerta dispara 60 dias antes do vencimento.
+      </div>
+
+      <section class="cartao">
+        <header><h2>Empresas de recebimento</h2>
+          <button class="btn btn--peq" id="btn-novo-destinador">Cadastrar destinador</button></header>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Empresa</th><th>CNPJ</th><th>Tipo</th><th>UF</th>
+            <th>Licença ambiental</th><th>Categorias aceitas</th><th></th></tr></thead>
+          <tbody id="tb-destinadores"></tbody>
         </table></div>
       </section>
     </section>

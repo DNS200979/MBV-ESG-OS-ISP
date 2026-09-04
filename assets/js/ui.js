@@ -142,3 +142,103 @@ export function baixarArquivo(nome, conteudo, mime = 'text/plain;charset=utf-8')
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+/* ====================================================================
+ * Wizard — fluxo guiado em etapas dentro de um modal.
+ *
+ * Usado onde a decisão tem consequência documental (triagem, cadastro de
+ * destinador, formação de lote): passo a passo evita que o usuário
+ * despache um lote sem olhar a licença do destinador, por exemplo.
+ * ==================================================================== */
+
+/**
+ * @param {object} cfg
+ * @param {string} cfg.titulo
+ * @param {Array<{titulo:string, render:(estado)=>string, aoSair?:(el,estado)=>any|Promise<any>}>} cfg.etapas
+ *        `aoSair` recebe o elemento do passo e o estado; retornar `false`
+ *        (ou lançar) impede o avanço.
+ * @param {(estado)=>any} cfg.aoConcluir
+ * @returns {Promise<any>} resolve com o retorno de aoConcluir, ou null se cancelado
+ */
+export function wizard({ titulo, etapas, aoConcluir, estadoInicial = {} }) {
+  return new Promise((resolve) => {
+    const estado = { ...estadoInicial };
+    let i = 0;
+
+    const fundo = document.createElement('div');
+    fundo.className = 'modal-fundo';
+    fundo.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(titulo)}">
+        <header>
+          <h2>${esc(titulo)}</h2>
+          <button class="modal__x" aria-label="Fechar">&times;</button>
+        </header>
+        <div class="wiz-trilha"></div>
+        <div class="modal__corpo"></div>
+        <footer>
+          <button class="btn btn--sec" data-voltar>Voltar</button>
+          <div style="flex:1"></div>
+          <button class="btn" data-avancar></button>
+        </footer>
+      </div>`;
+    document.body.appendChild(fundo);
+
+    const corpo   = fundo.querySelector('.modal__corpo');
+    const trilha  = fundo.querySelector('.wiz-trilha');
+    const btnVolt = fundo.querySelector('[data-voltar]');
+    const btnProx = fundo.querySelector('[data-avancar]');
+
+    const fechar = (v) => { fundo.remove(); document.removeEventListener('keydown', esc_); resolve(v); };
+    const esc_ = (e) => { if (e.key === 'Escape') fechar(null); };
+    document.addEventListener('keydown', esc_);
+    fundo.querySelector('.modal__x').addEventListener('click', () => fechar(null));
+    fundo.addEventListener('click', (e) => { if (e.target === fundo) fechar(null); });
+
+    const pintar = () => {
+      trilha.innerHTML = etapas.map((e, n) => `
+        <span class="wiz-passo${n === i ? ' wiz-passo--atual' : n < i ? ' wiz-passo--feito' : ''}">
+          <b>${n + 1}</b>${esc(e.titulo)}</span>`).join('');
+      corpo.innerHTML = etapas[i].render(estado);
+      btnVolt.style.visibility = i === 0 ? 'hidden' : 'visible';
+      btnProx.textContent = i === etapas.length - 1 ? 'Concluir' : 'Avançar';
+      etapas[i].aoEntrar?.(corpo, estado);
+      corpo.querySelector('input,select,textarea')?.focus();
+    };
+
+    btnVolt.addEventListener('click', () => { if (i > 0) { i--; pintar(); } });
+
+    btnProx.addEventListener('click', async () => {
+      btnProx.disabled = true;
+      try {
+        if (await etapas[i].aoSair?.(corpo, estado) === false) return;
+        if (i < etapas.length - 1) { i++; pintar(); }
+        else fechar(await aoConcluir(estado));
+      } catch (e) {
+        erro(e);
+      } finally {
+        btnProx.disabled = false;
+      }
+    });
+
+    pintar();
+  });
+}
+
+/** Modal simples de confirmação/exibição, sem etapas. */
+export function modal({ titulo, corpo, rotuloOk = 'Fechar' }) {
+  return new Promise((resolve) => {
+    const fundo = document.createElement('div');
+    fundo.className = 'modal-fundo';
+    fundo.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true">
+        <header><h2>${esc(titulo)}</h2><button class="modal__x" aria-label="Fechar">&times;</button></header>
+        <div class="modal__corpo">${corpo}</div>
+        <footer><div style="flex:1"></div><button class="btn" data-ok>${esc(rotuloOk)}</button></footer>
+      </div>`;
+    document.body.appendChild(fundo);
+    const fechar = () => { fundo.remove(); resolve(true); };
+    fundo.querySelector('[data-ok]').addEventListener('click', fechar);
+    fundo.querySelector('.modal__x').addEventListener('click', fechar);
+    fundo.addEventListener('click', (e) => { if (e.target === fundo) fechar(); });
+  });
+}

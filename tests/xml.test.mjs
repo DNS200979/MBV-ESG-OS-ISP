@@ -32,6 +32,22 @@ ok(Math.abs(c.peso_toneladas - 2.45) < 1e-9, `2450 kg → ${c.peso_toneladas} t`
 ok(c.valor_prestacao === 3200, 'valor da prestação');
 ok(c.inconsistencias.some(i => i.includes('Distância')), 'inconsistência de distância registrada');
 
+console.log('— NF-e de equipamentos (inventário de rede) —');
+const { lerNFe: _ln } = await import('../assets/js/xml.js');
+const eq = _ln(fixture('nfe-equipamentos.xml'));
+const onu = eq.itens[0], olt = eq.itens[1], cabo = eq.itens[2], paraf = eq.itens[3];
+ok(onu.equipamento === true, 'ONU classificada como equipamento (NCM 8517)');
+ok(onu.unidades === 50, `50 unidades de ONU (veio ${onu.unidades})`);
+ok(onu.seriais.length === 3, `3 seriais extraídos do infAdProd (veio ${onu.seriais.length})`);
+ok(onu.seriais[0] === 'ALFA0000000001', 'serial correto do texto livre');
+ok(onu.valor_unitario === 150, `valor unitário 150,00 (veio ${onu.valor_unitario})`);
+ok(olt.seriais.length === 2, 'seriais no formato "N/S:" também extraídos');
+ok(cabo.equipamento === true && cabo.unidades === 2000, 'cabo é equipamento; metros contados como unidades');
+ok(paraf.equipamento === false, 'parafuso NÃO vira ativo de rede');
+ok(eq.total_equipamentos === 2052, `total de equipamentos = ${eq.total_equipamentos}`);
+ok(eq.inconsistencias.some(i => i.includes('série') || i.includes('provisório')),
+   'inconsistência registrada para unidades sem série');
+
 console.log('— roteamento e erro —');
 ok(lerDocumentoXml(fixture('cte-rodoviario.xml')).tipo === 'cte', 'detecção automática de tipo');
 try { lerDocumentoXml('<foo/>'); ok(false,'devia recusar XML desconhecido'); }
